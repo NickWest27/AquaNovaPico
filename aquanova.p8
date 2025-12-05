@@ -41,49 +41,132 @@ sub = {
   depth = 0 -- meters 0-1200
 }
 
+-- === field selection ===
+current_field = 1
+field_count = 1
+
 -- === initialization ===
 function _init()
   -- resources initialized above
+  update_field_count()
 end
 
 -- === update loop (30 times a second) ===
 function _update()
-  -- station switching (x button always works)
-  if btnp(5) then -- x button
+  handle_input()
+  update_time()
+end
+
+function handle_input()
+  -- field navigation (up/down)
+  if btnp(2) then -- up arrow
+    current_field -= 1
+    if current_field < 1 then
+      current_field = field_count
+    end
+  elseif btnp(3) then -- down arrow
+    current_field += 1
+    if current_field > field_count then
+      current_field = 1
+    end
+  end
+
+  -- field value adjustment (left/right)
+  if btnp(0) or btnp(1) then
+    if gamestate == "helm" then
+      handle_helm_fields()
+    elseif gamestate == "bridge" then
+      handle_bridge_fields()
+    elseif gamestate == "quarters" then
+      handle_quarters_fields()
+    elseif gamestate == "science" then
+      handle_science_fields()
+    elseif gamestate == "engineering" then
+      handle_engineering_fields()
+    end
+  end
+end
+
+function handle_helm_fields()
+  if current_field == 1 then -- station
+    cycle_station()
+  elseif current_field == 2 then -- heading
+    if btnp(1) then -- right
+      sub.heading += 15
+      if sub.heading >= 360 then sub.heading -= 360 end
+    else -- left
+      sub.heading -= 15
+      if sub.heading < 0 then sub.heading += 360 end
+    end
+  elseif current_field == 3 then -- speed
+    if btnp(1) then -- right
+      sub.speed += 10
+      if sub.speed > 160 then sub.speed = 160 end
+    else -- left
+      sub.speed -= 10
+      if sub.speed < 0 then sub.speed = 0 end
+    end
+  elseif current_field == 4 then -- depth
+    if btnp(1) then -- right
+      sub.depth += 50
+      if sub.depth > 1200 then sub.depth = 1200 end
+    else -- left
+      sub.depth -= 50
+      if sub.depth < 0 then sub.depth = 0 end
+    end
+  end
+end
+
+function handle_bridge_fields()
+  if current_field == 1 then -- station
+    cycle_station()
+  end
+end
+
+function handle_quarters_fields()
+  if current_field == 1 then -- station
+    cycle_station()
+  end
+end
+
+function handle_science_fields()
+  if current_field == 1 then -- station
+    cycle_station()
+  end
+end
+
+function handle_engineering_fields()
+  if current_field == 1 then -- station
+    cycle_station()
+  end
+end
+
+function cycle_station()
+  if btnp(0) then -- left
+    station_index -= 1
+    if station_index < 1 then
+      station_index = #stations
+    end
+  else -- right
     station_index += 1
     if station_index > #stations then
       station_index = 1
     end
-    gamestate = stations[station_index]
   end
+  gamestate = stations[station_index]
+  current_field = 1
+  update_field_count()
+end
 
-  -- helm controls (only when on helm station)
+function update_field_count()
   if gamestate == "helm" then
-    if btnp(0) then -- left arrow
-      sub.heading -= 15
-      if sub.heading < 0 then
-        sub.heading += 360
-      end
-    elseif btnp(1) then -- right arrow
-      sub.heading += 15
-      if sub.heading >= 360 then
-        sub.heading -= 360
-      end
-    end
-
-    if btnp(2) then -- up arrow
-      sub.speed += 10
-      if sub.speed > 160 then
-        sub.speed = 160
-      end
-    elseif btnp(3) then -- down arrow
-      sub.speed -= 10
-      if sub.speed < 0 then
-        sub.speed = 0
-      end
-    end
+    field_count = 4
+  else
+    field_count = 1
   end
+end
 
+function update_time()
   -- time progression
   game_time += 1
 
@@ -132,53 +215,83 @@ end
 
 -- === station screens ===
 function draw_bridge()
-  print("bridge", 40, 60, 7)
-  print("(navigation)", 30, 68, 6)
+  print("bridge", 40, 12, 7)
+
+  local y = 30
+  draw_field(1, "station", gamestate, 10, y)
+
+  y += 20
+  print("(navigation coming soon)", 18, y, 6)
 end
 
 function draw_helm()
   print("helm controls", 32, 12, 7)
 
-  -- display heading
-  local y = 35
-  print("heading:", 10, y, 6)
-  print(sub.heading .. " deg", 70, y, 7)
+  local y = 30
 
-  -- heading indicator (simple compass)
+  -- field 1: station
+  draw_field(1, "station", gamestate, 10, y)
   y += 15
+
+  -- field 2: heading
   local compass = {"n", "ne", "e", "se", "s", "sw", "w", "nw"}
   local dir_idx = flr((sub.heading + 22.5) / 45) % 8 + 1
-  print("direction: " .. compass[dir_idx], 10, y, 12)
-
-  -- display speed
-  y += 20
-  print("speed:", 10, y, 6)
-  print(sub.speed .. " knots", 70, y, 7)
-
-  -- display depth
+  draw_field(2, "heading", sub.heading .. "deg " .. compass[dir_idx], 10, y)
   y += 15
-  print("depth:", 10, y, 6)
-  print(sub.depth .. " m", 70, y, 7)
+
+  -- field 3: speed
+  draw_field(3, "speed", sub.speed .. " knots", 10, y)
+  y += 15
+
+  -- field 4: depth
+  draw_field(4, "depth", sub.depth .. " m", 10, y)
+  y += 20
 
   -- controls help
-  y += 25
-  print("arrows: turn/speed", 20, y, 6)
-  print("left/right: heading", 20, y+8, 6)
-  print("up/down: speed", 20, y+16, 6)
+  print("up/down: cycle field", 8, y, 6)
+  print("left/right: adjust value", 8, y+8, 6)
+end
+
+function draw_field(field_num, label, value, x, y)
+  local color = 6 -- gray when not selected
+  local prefix = " "
+  local suffix = " "
+
+  if current_field == field_num then
+    color = 7 -- white when selected
+    prefix = ">"
+    suffix = "<"
+  end
+
+  print(prefix .. label .. ": " .. value .. suffix, x, y, color)
 end
 
 function draw_science()
-  print("science", 38, 60, 7)
-  print("(samples)", 32, 68, 6)
+  print("science", 42, 12, 7)
+
+  local y = 30
+  draw_field(1, "station", gamestate, 10, y)
+
+  y += 20
+  print("(sample analysis soon)", 16, y, 6)
 end
 
 function draw_engineering()
-  print("engineering", 42, 60, 7)
-  print("(management)", 28, 68, 6)
+  print("engineering", 34, 12, 7)
+
+  local y = 30
+  draw_field(1, "station", gamestate, 10, y)
+
+  y += 20
+  print("(power management soon)", 12, y, 6)
 end
 
 function draw_quarters()
   print("captain's quarters", 16, 12, 7)
+
+  local y = 25
+  draw_field(1, "station", gamestate, 10, y)
+  y += 15
 
   -- display mission clock (day and time)
   local hour_str = current_hour
@@ -189,21 +302,22 @@ function draw_quarters()
   if current_minute < 10 then
     min_str = "0" .. current_minute
   end
-  print("mission clock", 10, 22, 6)
-  print("day: " .. current_day .. " time: " .. hour_str .. ":" .. min_str, 10, 30, 7)
+  print("mission clock", 10, y, 6)
+  y += 8
+  print("day: " .. current_day .. " " .. hour_str .. ":" .. min_str, 10, y, 7)
+  y += 15
 
   -- display resources
-  local y = 45
   print("money: $" .. resources.money, 10, y, 10)
-  y += 10
+  y += 8
   print("food: " .. resources.food, 10, y, 8)
-  y += 10
+  y += 8
   print("supplies: " .. resources.supplies, 10, y, 12)
-  y += 10
+  y += 8
   print("reactor: " .. resources.reactor .. "%", 10, y, 11)
-  y += 10
+  y += 8
   print("o2 scrub: " .. resources.o2_scrubbers .. "%", 10, y, 7)
-  y += 10
+  y += 8
   print("reputation: " .. resources.reputation, 10, y, 14)
 
   -- game over warning

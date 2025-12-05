@@ -164,10 +164,18 @@ TOTAL: ~1110 tokens (~3.5% of 32KB limit)
 - _update() - Runs 30 times per second (logic)
 - _draw() - Runs 30 times per second (display)
 
-**Buttons**:
-- btnp(5) = X button (pressed this frame)
-- btn(5) = X button (held down)
+**Unified Control Scheme** (IMPORTANT!):
+- Up/Down Arrows: Cycle through fields (including STATION field)
+- Left/Right Arrows: Adjust value of highlighted field
+- Visual highlight shows selected field: >field: value<
+- Every station has a STATION field (left/right cycles stations)
+- X (❎) button: Accept/Confirm (reserved for future menus)
+- O (🅾️) button: Cancel/Back (reserved for future menus)
+
+**Button Mapping**:
 - 0=left, 1=right, 2=up, 3=down, 4=O, 5=X
+- btnp() = pressed this frame
+- btn() = held down
 
 **Angles**:
 - Pico-8 uses 0.0-1.0 for full circle (not 0-360)
