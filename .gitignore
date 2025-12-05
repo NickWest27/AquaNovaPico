@@ -1,0 +1,20 @@
+# Pico-8 specific
+*.p8~
+*.p8.png
+*.spr
+*.pal
+
+# Editor and IDE
+.vscode/
+.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+
+# OS
+Thumbs.db
+
+# Project specific
+/builds/
+/dist/
