@@ -45,6 +45,17 @@ sub = {
 current_field = 1
 field_count = 1
 
+-- === map and locations ===
+world_size = 2000 -- world is 2000x2000 units
+map_size = 96 -- map display is 96x96 pixels
+
+-- sample sites
+sample_sites = {
+  {x=500, y=300, collected=false},
+  {x=-400, y=200, collected=false},
+  {x=300, y=-500, collected=false}
+}
+
 -- === initialization ===
 function _init()
   -- resources initialized above
@@ -55,6 +66,7 @@ end
 function _update()
   handle_input()
   update_time()
+  update_movement()
 end
 
 function handle_input()
@@ -192,6 +204,32 @@ function update_time()
   end
 end
 
+function update_movement()
+  -- convert heading (0-360 degrees) to pico-8 angle (0.0-1.0)
+  local angle = sub.heading / 360
+
+  -- calculate velocity based on heading and speed
+  -- speed is in knots, scale by time (1 frame at 60 knots = 1 unit per 30 frames)
+  local speed_scale = sub.speed / 30
+
+  -- pico-8 cos/sin: 0=right, 0.25=down, 0.5=left, 0.75=up
+  local dx = cos(angle) * speed_scale
+  local dy = sin(angle) * speed_scale
+
+  -- update submarine position
+  sub.x += dx
+  sub.y += dy
+end
+
+-- === helper functions ===
+function world_to_screen(world_x, world_y)
+  -- convert world coordinates to screen coordinates
+  -- map is centered on screen at (16, 16) to (112, 112)
+  local screen_x = 16 + (world_x / world_size + 0.5) * map_size
+  local screen_y = 16 + (world_y / world_size + 0.5) * map_size
+  return screen_x, screen_y
+end
+
 -- === draw loop (30fps) ===
 function _draw()
   cls()
@@ -215,13 +253,45 @@ end
 
 -- === station screens ===
 function draw_bridge()
-  print("bridge", 40, 12, 7)
+  print("tactical map", 34, 12, 7)
 
-  local y = 30
+  local y = 25
   draw_field(1, "station", gamestate, 10, y)
+  y += 15
 
-  y += 20
-  print("(navigation coming soon)", 18, y, 6)
+  -- draw map border
+  rect(15, 15, 113, 113, 6)
+
+  -- draw grid lines
+  line(64, 15, 64, 113, 1) -- vertical center
+  line(15, 64, 113, 64, 1) -- horizontal center
+
+  -- draw port at (0,0)
+  local port_x, port_y = world_to_screen(0, 0)
+  rectfill(port_x-2, port_y-2, port_x+2, port_y+2, 10)
+  print("p", port_x-1, port_y-1, 0)
+
+  -- draw sample sites
+  for site in all(sample_sites) do
+    if not site.collected then
+      local sx, sy = world_to_screen(site.x, site.y)
+      circfill(sx, sy, 2, 12)
+      print("s", sx-1, sy-1, 7)
+    end
+  end
+
+  -- draw submarine
+  local sub_x, sub_y = world_to_screen(sub.x, sub.y)
+  circfill(sub_x, sub_y, 2, 8)
+
+  -- draw heading indicator
+  local heading_angle = sub.heading / 360
+  local hx = sub_x + cos(heading_angle) * 4
+  local hy = sub_y + sin(heading_angle) * 4
+  line(sub_x, sub_y, hx, hy, 7)
+
+  -- display coordinates below map
+  print("pos: " .. flr(sub.x) .. ", " .. flr(sub.y), 16, 116, 6)
 end
 
 function draw_helm()
@@ -232,6 +302,10 @@ function draw_helm()
   -- field 1: station
   draw_field(1, "station", gamestate, 10, y)
   y += 15
+
+  -- display position
+  print("position: x: " .. flr(sub.x) .. " y: " .. flr(sub.y), 10, y, 7)
+  y += 10
 
   -- field 2: heading
   local compass = {"n", "ne", "e", "se", "s", "sw", "w", "nw"}
@@ -305,6 +379,12 @@ function draw_quarters()
   print("mission clock", 10, y, 6)
   y += 8
   print("day: " .. current_day .. " " .. hour_str .. ":" .. min_str, 10, y, 7)
+  y += 15
+
+  -- display position
+  print("position", 10, y, 6)
+  y += 8
+  print("x: " .. flr(sub.x) .. " y: " .. flr(sub.y), 10, y, 7)
   y += 15
 
   -- display resources
