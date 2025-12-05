@@ -1,0 +1,419 @@
+Aqua Nova Pico - Detailed Implementation Plan
+Overview
+Building a submarine strategy game for Pico-8 from scratch. Starting with a complete skeleton, then implementing one full gameplay loop: Port → Navigate → Collect Samples → Return → Resupply. Target File: aquanova.p8 Approach: Incremental development where each phase is runnable and testable. You're new to Pico-8, so each step includes explanations of Pico-8 concepts.
+Minimum Viable Gameplay Loop
+The Core Loop We're Building:
+Start at port (0,0) with initial resources (1000 money, 50 food)
+Accept mission: "Collect 3 samples"
+Use Bridge station to plot waypoint to sample site
+Use Helm station to set speed (submarine auto-navigates)
+Time passes → food decreases daily
+Arrive at waypoint → collect sample (press X)
+Return to port (plot waypoint back to 0,0)
+Dock at port → sell samples for money, buy food
+Complete mission → earn reward + reputation
+Repeat with new missions
+Why This Loop?
+Demonstrates all core mechanics (multi-station UI, resources, navigation, missions)
+Every step is testable with visible progress
+Sets foundation for future expansion
+Achievable within Pico-8's constraints
+Pico-8 Foundation Concepts
+The Three Sacred Functions
+function _init()
+  -- Runs ONCE when game starts
+  -- Initialize all variables and state
+end
+
+function _update()
+  -- Runs 30 times per second
+  -- Handle input, update game logic
+end
+
+function _draw()
+  -- Runs 30 times per second (after _update)
+  -- Clear screen and draw everything
+end
+Game State Pattern (Multi-Station System)
+gamestate = "bridge"  -- Current active station
+
+-- Switch stations with Tab or shoulder buttons
+-- Each station has its own update/draw logic
+Key Pico-8 Gotchas
+Angles: Use 0.0-1.0 for full circle (not 0-360°). 0=right, 0.25=down, 0.5=left, 0.75=up
+Buttons: btnp() = pressed this frame, btn() = held down. 0=left, 1=right, 2=up, 3=down, 4=O, 5=X
+Coordinates: (0,0) = top-left, (127,127) = bottom-right
+Token Limit: 32KB compressed - comments count too!
+Implementation Phases (Step-by-Step)
+Phase 0: Foundation (Skeleton) ⚡ START HERE
+Goal: Basic Pico-8 structure with station switching What to Build:
+Create _init(), _update(), _draw() functions
+Add gamestate variable to track current station
+Implement station switching (Tab key or buttons 4/5)
+Draw placeholder text for each station:
+"BRIDGE"
+"HELM"
+"SCIENCE"
+"POWER"
+"CAPTAIN'S QUARTERS"
+How to Test:
+Run cart, see "BRIDGE" on screen
+Press Tab (or button 5), see "HELM"
+Cycle through all 5 stations
+Pico-8 Concepts: _init/_update/_draw lifecycle, cls(), print(), btnp(), game state Estimated Tokens: ~50
+Phase 1: Resource Display (Captain's Quarters)
+Goal: Show all game resources on screen What to Build:
+Create resources table in _init():
+money = 1000
+food = 50
+supplies = 20
+reactor = 100 (percentage)
+o2_scrubbers = 100 (percentage)
+reputation = 0
+Create draw_status() function
+Display each resource with label, value, and color
+Format: "MONEY: 1000" (color 10=yellow for money, 8=red for food, etc.)
+How to Test:
+Navigate to Captain's Quarters station
+See all 6 resources displayed clearly
+Values are readable and color-coded
+Pico-8 Concepts: Tables, print(text, x, y, color), color palette (0-15) Estimated Tokens: ~80
+
+Phase 2: Time System & Resource Drain
+Goal: Make time pass and watch food decrease What to Build:
+Add time tracking variables:
+game_time = 0 (minutes elapsed)
+day_length = 1440 (minutes in a day)
+In _update(): increment game_time each frame (scale appropriately)
+When game_time % day_length == 0: decrement food by 1
+Display current day on status screen: DAY: + day number
+Add game over check: if food <= 0, show "OUT OF FOOD - GAME OVER"
+How to Test:
+Watch day counter increase over time
+See food decrease by 1 each new day
+Let food reach 0, see game over message
+Pico-8 Concepts: Modulo % for cyclic events, frame timing (30 fps), conditional logic Estimated Tokens: ~60
+Phase 3: Helm Controls
+Goal: Manual controls for heading and speed What to Build:
+Create sub table in _init():
+x = 0, y = 0 (position)
+heading = 0 (degrees 0-360)
+speed = 0 (knots 0-160)
+depth = 0 (meters 0-1200, not used yet)
+Create draw_helm() function
+Display current heading, speed, depth with large text
+Controls:
+Left arrow: decrease heading by 15°
+Right arrow: increase heading by 15°
+Up arrow: increase speed by 10 knots
+Down arrow: decrease speed by 10 knots
+Wrap heading (0-360) and clamp speed (0-160)
+How to Test:
+Navigate to Helm station
+Press left arrow → see "HEADING: 345"
+Press up arrow → see "SPEED: 10"
+Hold right, watch heading increment and wrap at 360
+Hold down at speed 0, confirm it doesn't go negative
+Pico-8 Concepts: btn() vs btnp(), value wrapping/clamping, numeric displays Estimated Tokens: ~100
+Phase 4: Submarine Movement
+Goal: Submarine actually moves based on helm settings What to Build:
+In _update(): convert heading and speed to velocity
+Convert degrees to Pico-8 angle: angle = heading / 360
+Calculate dx = cos(angle) * speed * time_scale
+Calculate dy = sin(angle) * speed * time_scale
+Update sub.x += dx and sub.y += dy
+Add appropriate time scaling (e.g., 1 frame = 1 game minute at speed 60)
+Display submarine position on status screen: POS: x, y
+How to Test:
+Set heading to 90 (east), speed to 60
+Watch X coordinate increase on status screen
+Set heading to 0 (north), see Y coordinate decrease
+Set speed to 0, confirm movement stops
+Pico-8 Concepts: cos() and sin() for directional movement, Pico-8 angle system (0.0-1.0) Estimated Tokens: ~80
+Phase 5: Bridge/Map Display
+Goal: Tactical map showing submarine position What to Build:
+Create draw_bridge() function
+Draw map area (e.g., 96x96 pixel area centered on screen)
+Draw submarine as a small circle or triangle
+Draw port at (0,0) as a different colored square
+Draw sample site at fixed location (e.g., 500, 300) as another marker
+Scale world coordinates to screen coordinates:
+If world is 2000x2000, map 100x100 pixel area
+Screen point = (world coord / world size) * screen size
+Display map coordinates at top
+How to Test:
+Navigate to Bridge
+See submarine marker (should start at port location)
+Switch to Helm, set speed and heading
+Switch back to Bridge, watch submarine move on map
+Confirm port and sample site are visible
+Pico-8 Concepts: rect(), rectfill(), circfill(), pset(), coordinate transformation Estimated Tokens: ~120
+Phase 6: Waypoint System
+Goal: Click to set waypoint, submarine auto-navigates What to Build:
+Add cursor to bridge map:
+Arrow keys move cursor position
+Draw cursor as crosshair or square outline
+Add waypoint system:
+Press X to place waypoint at cursor
+Store waypoint coords: waypoint = {x = cursor_x, y = cursor_y, active = true}
+Draw waypoint marker (different color)
+Auto-navigation in _update():
+If waypoint active, calculate desired heading to waypoint
+Use atan2(dy, dx) to get angle to target
+Gradually adjust sub.heading toward desired heading
+Arrival detection:
+Calculate distance to waypoint
+If distance < 10, set waypoint.active = false
+Show "ARRIVED AT WAYPOINT" message
+How to Test:
+On Bridge, move cursor to sample site location
+Press X, see waypoint marker placed
+Set speed on Helm (e.g., 80 knots)
+Watch submarine automatically turn toward waypoint
+Watch submarine approach and arrive
+See arrival message
+Pico-8 Concepts: Cursor tracking, atan2(dy, dx), distance formula sqrt((x2-x1)^2 + (y2-y1)^2) Estimated Tokens: ~150
+Phase 7: Sample Collection
+Goal: Collect samples at waypoint locations What to Build:
+Define sample sites as table:
+sample_sites = {
+  {x=500, y=300, collected=false},
+  {x=-400, y=200, collected=false},
+  {x=300, y=-500, collected=false}
+}
+In _update(): check if submarine is near any uncollected sample site
+If near (distance < 20) and not collected:
+Show "PRESS X TO COLLECT SAMPLE" on screen
+If X pressed: increment resources.supplies, mark site as collected
+Draw collected sites with different color (or don't draw them)
+How to Test:
+Navigate to sample site waypoint
+Arrive, see "PRESS X TO COLLECT SAMPLE" prompt
+Press X, watch supplies increase from 20 to 21
+See "SAMPLE COLLECTED" message
+Sample site marker disappears or changes color
+Navigate to another site, repeat
+Pico-8 Concepts: Tables of objects, proximity detection, state changes Estimated Tokens: ~100
+Phase 8: Port Docking & Resupply
+Goal: Sell samples and buy food at port What to Build:
+In _update(): detect when submarine at port (distance to 0,0 < 50)
+When at port, show "PRESS X TO DOCK" prompt
+Create port menu state:
+Menu options: "SELL SAMPLE: +$100", "BUY FOOD (10): -$50", "UNDOCK"
+Arrow keys to select option
+X to confirm selection
+Implement transactions:
+Sell sample: if supplies > 0, money += 100, supplies -= 1
+Buy food: if money >= 50, money -= 50, food += 10
+Undock: close menu, return to normal navigation
+Show updated resource values in menu
+How to Test:
+Navigate back to port (waypoint to 0,0)
+Arrive, see "PRESS X TO DOCK"
+Press X, see port menu appear
+Select "SELL SAMPLE", press X
+See money increase by 100, supplies decrease by 1
+Select "BUY FOOD", press X
+See money decrease by 50, food increase by 10
+Select "UNDOCK", return to map
+Can navigate away and return
+Pico-8Concepts: Menu state management, cursor selection, transaction logic, sub-states Estimated Tokens: ~150
+Phase 9: Mission Framework
+Goal: Accept and complete missions for rewards What to Build:
+Create mission structure:
+mission = {
+  active = false,
+  objective = "Collect 3 samples",
+  target_samples = 3,
+  samples_collected = 0,
+  reward_money = 500,
+  reward_rep = 1
+}
+Add "ACCEPT MISSION" option to port menu
+Track progress:
+When sample collected during active mission, increment mission.samples_collected
+Display progress on status screen: "MISSION: 2/3 SAMPLES"
+Check completion when docking:
+If samples_collected >= target_samples, show "MISSION COMPLETE!"
+Award reward_money and reward_rep
+Reset mission for next one
+Show mission details on Captain's Quarters station
+How to Test:
+Dock at port, accept mission "Collect 3 samples"
+See mission on status screen
+Collect 1 sample → see "1/3 SAMPLES"
+Collect 2 more samples → see "3/3 SAMPLES"
+Return to port, dock
+See "MISSION COMPLETE! +$500 +1 REP"
+Check resources: money increased, reputation increased
+Can accept another mission
+Pico-8 Concepts: Mission data structure, progress tracking, conditional rewards Estimated Tokens: ~120
+Phase 10: Polish & Balance
+Goal: Make the loop fun and well-tuned What to Build:
+Balance resource consumption:
+Adjust time scale so days pass at engaging rate
+Tune food consumption (maybe 1 food per 2-3 days?)
+Adjust prices (food cost, sample value)
+Add feedback:
+Brief pause/flash when collecting sample
+Brief message when mission accepted/completed
+Add simple title screen:
+Show "AQUA NOVA PICO" and "PRESS X TO START"
+Initialize game on X press
+Add controls help screen:
+Accessible from Captain's Quarters (press O button)
+Show all controls: arrows, X, O, Tab
+Optional: Add simple sound effects (if time/tokens permit)
+Station switch: sfx(0)
+Sample collected: sfx(1)
+Mission complete: sfx(2)
+How to Test:
+Play complete loop multiple times
+Verify pacing feels good (not too slow or too fast)
+All actions have clear feedback
+Controls are explained in-game
+Title screen works
+Can complete multiple missions in a row
+Pico-8 Concepts: Game balance, title screen state, sfx() for sound Estimated Tokens: ~100
+Phase Summary & Token Budget
+Phase	Focus	Tokens	Cumulative
+0	Foundation skeleton	50	50
+1	Resource display	80	130
+2	Time & consumption	60	190
+3	Helm controls	100	290
+4	Submarine movement	80	370
+5	Bridge map display	120	490
+6	Waypoint auto-nav	150	640
+7	Sample collection	100	740
+8	Port & resupply	150	890
+9	Mission system	120	1010
+10	Polish & balance	100	1110
+Total First Loop: ~1110 tokens (~3.5% of 32KB limit) Plenty of room for expansion!
+Testing Strategy
+After Each Phase
+✅ Cart runs without errors
+✅ Can see new feature working visually
+✅ State persists frame-to-frame
+✅ Controls are responsive
+✅ Previous features still work (no regressions)
+Final Loop Test (After Phase 10)
+Play through complete gameplay loop:
+Start game from title screen
+Accept mission at port
+Plot waypoint to sample site
+Set speed on helm
+Watch auto-navigation work
+Collect 3 samples
+Return to port
+Sell samples, buy food
+Complete mission, get reward
+Accept new mission and repeat
+Success Criteria:
+Loop is fun and engaging
+Resource management creates tension
+Clear sense of progression
+All stations serve a purpose
+Can play multiple missions without confusion
+Code Organization Pattern
+-- === INITIALIZATION ===
+function _init()
+  init_resources()
+  init_submarine()
+  init_map()
+  gamestate = "bridge"
+end
+
+-- === UPDATE LOOP ===
+function _update()
+  if gamestate == "menu" then
+    update_menu()
+  elseif gamestate == "bridge" then
+    update_bridge()
+  elseif gamestate == "helm" then
+    update_helm()
+  -- ... etc
+  end
+
+  update_time()
+  update_movement()
+end
+
+-- === DRAW LOOP ===
+function _draw()
+  cls()
+
+  if gamestate == "menu" then
+    draw_menu()
+  elseif gamestate == "bridge" then
+    draw_bridge()
+  elseif gamestate == "helm" then
+    draw_helm()
+  -- ... etc
+  end
+
+  draw_ui_chrome()  -- Station name, quick resource summary
+end
+
+-- === HELPER FUNCTIONS ===
+function distance(x1, y1, x2, y2)
+  return sqrt((x2-x1)^2 + (y2-y1)^2)
+end
+
+function angle_to(x1, y1, x2, y2)
+  return atan2(y2-y1, x2-x1)
+end
+Future Expansion Path (After Core Loop Works)
+Tier 2 - Next Priority
+Multiple mission types (rescue, salvage, discovery)
+Reputation-based mission unlocking
+More sample sites (hand-placed or procedural)
+Reactor degradation (power affects max speed)
+Depth controls fully implemented
+Tier 3 - Later
+Power Management station (allocate power to systems)
+Science station (analyze samples for bonus)
+Multiple ports/regions
+Terrain/hazards causing hull damage
+Submarine upgrades (better reactor, cargo, etc.)
+Tier 4 - Advanced
+Sonar system for detection
+Random events (equipment failures, discoveries)
+Save/load game state
+Different submarine types
+Story campaign with narrative
+README Updates Needed
+After implementation, update README.md: Change "✅ Implemented" section to:
+### ✅ Implemented
+- Multi-station interface system (Bridge, Helm, Captain's Quarters)
+- Basic navigation with waypoint plotting and auto-navigation
+- Helm controls (heading, speed)
+- Resource tracking (money, food, supplies, reactor, O2, reputation)
+- Time progression and daily resource consumption
+- Map display with features (port, sample sites)
+- Sample collection at waypoints
+- Port docking and resupply mechanics (buy/sell)
+- Basic mission system (accept, complete, reward)
+Change "🚧 In Progress" section to:
+### 🚧 In Progress
+- Multiple mission types and variety
+- Reputation-based progression
+- Depth mechanics and pressure limits
+Critical Files
+aquanova.p8 - Single Pico-8 cartridge containing all code, sprites, sounds, maps
+Note: Pico-8 uses a self-contained .p8 file format. All code goes in the __lua__ section (currently just "hello world"). Other sections (__gfx__, __sfx__, etc.) can be edited in Pico-8's built-in editors and are optional for the core loop.
+Development Workflow
+Recommended Process
+Edit code in external editor or Pico-8's built-in editor
+Run cart in Pico-8 (press Ctrl+R or type run)
+Test feature - verify it works as expected
+Check tokens - press Ctrl+P in Pico-8 editor, look at token count
+Commit to git after each working phase
+Update README as features are completed
+Pico-8 Commands
+run or Ctrl+R - Run the current cart
+save - Save changes to cart
+reboot - Restart Pico-8
+folder - Open cart folder in file explorer
+Ctrl+P - Show token/character count in editor
+Next Steps
+Start with Phase 0: Foundation (Skeleton) ⚡ This creates the basic structure that everything else builds on. You'll have a working multi-station interface that you can tab through - proving the core architecture works before adding any complexity. After Phase 0 works, proceed through phases 1-10 in order. Each phase builds directly on the previous one and is independently testable.

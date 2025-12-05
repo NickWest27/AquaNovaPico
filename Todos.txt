@@ -1,0 +1,199 @@
+# AQUA NOVA PICO - Implementation Plan & Progress
+
+## Overview
+Building a submarine strategy game for Pico-8 from scratch.
+Core Loop: Port → Navigate → Collect Samples → Return → Resupply
+
+Full plan: /Users/nickwest/.claude/plans/precious-snuggling-rossum.md
+
+---
+
+## IMPLEMENTATION PROGRESS
+
+### Phase 0: Foundation Skeleton ✅ COMPLETE
+**Goal**: Basic Pico-8 structure with station switching
+**Status**: DONE
+**What was built**:
+- Created _init(), _update(), _draw() functions
+- Added gamestate variable to track current station
+- Implemented station switching (left/right arrows)
+- 5 station placeholders: Bridge, Helm, Science, Power, Status
+**Testing**: Press left/right arrows to cycle through all 5 stations
+**Tokens**: ~50
+
+---
+
+### Phase 1: Resource Display System ✅ COMPLETE
+**Goal**: Show all game resources on Captain's Quarters screen
+**Status**: DONE
+**What was built**:
+- Created resources table with 6 resource types
+- money = 1000, food = 50, supplies = 20
+- reactor = 100, o2_scrubbers = 100, reputation = 0
+- Updated draw_status() with color-coded resource display
+**Testing**: Navigate to Status station, see all resources
+**Tokens**: ~80
+
+---
+
+### Phase 2: Time System & Resource Drain ✅ COMPLETE
+**Goal**: Make time pass and watch food decrease
+**Status**: DONE
+**What was built**:
+- Added game_time, day_length (1800 frames = 60 sec), current_day
+- Time increments in _update(), new day every 60 seconds
+- Food decreases by 1 each day
+- Day counter displayed on quarters screen
+- Game over message when food = 0
+**Testing**: Watch days increment, food decrease to 0
+**Tokens**: ~60
+
+
+---
+
+### Phase 3: Helm Controls ✅ COMPLETE
+**Goal**: Manual controls for heading and speed
+**Status**: DONE
+**What was built**:
+- Created sub table (x, y, heading, speed, depth)
+- Implemented helm controls (left/right for heading, up/down for speed)
+- Heading wraps at 0/360, speed clamped at 0-160
+- Updated draw_helm() with heading, compass direction, speed, depth
+- X button now switches stations (so arrows work for helm)
+**Testing**: On helm, use arrows to adjust heading/speed
+**Tokens**: ~100
+
+---
+
+### Phase 4: Submarine Movement 🔄 NEXT
+**Goal**: Submarine actually moves based on helm settings
+**What to build**:
+- Convert heading/speed to velocity using cos/sin
+- Update submarine position each frame
+- Display position on status screen
+**Testing**: Set heading/speed, watch position change
+**Tokens**: ~80
+
+---
+
+### Phase 5: Bridge/Map Display ⏳ PENDING
+**Goal**: Tactical map showing submarine position
+**What to build**:
+- Create draw_bridge() with map area
+- Draw submarine as marker
+- Draw port at (0,0)
+- Draw sample site at (500, 300)
+- Scale world coords to screen coords
+**Testing**: See submarine move on map as helm changes
+**Tokens**: ~120
+
+---
+
+### Phase 6: Waypoint System ⏳ PENDING
+**Goal**: Click to set waypoint, submarine auto-navigates
+**What to build**:
+- Add cursor to bridge map (arrow keys move)
+- Press X to place waypoint
+- Auto-calculate heading to waypoint
+- Arrival detection
+**Testing**: Place waypoint, watch sub navigate to it
+**Tokens**: ~150
+
+---
+
+### Phase 7: Sample Collection ⏳ PENDING
+**Goal**: Collect samples at waypoint locations
+**What to build**:
+- Define sample_sites table
+- Proximity detection to sites
+- Press X to collect, increment supplies
+- Mark sites as collected
+**Testing**: Navigate to site, collect sample
+**Tokens**: ~100
+
+---
+
+### Phase 8: Port Docking & Resupply ⏳ PENDING
+**Goal**: Sell samples and buy food at port
+**What to build**:
+- Detect when at port (0,0)
+- Port menu (sell sample, buy food, undock)
+- Transaction logic
+**Testing**: Dock, sell samples, buy food
+**Tokens**: ~150
+
+---
+
+### Phase 9: Mission Framework ⏳ PENDING
+**Goal**: Accept and complete missions for rewards
+**What to build**:
+- Mission structure (objective, reward, progress)
+- Accept mission at port
+- Track progress
+- Award rewards on completion
+**Testing**: Complete mission, get reward
+**Tokens**: ~120
+
+---
+
+### Phase 10: Polish & Balance ⏳ PENDING
+**Goal**: Make the loop fun and well-tuned
+**What to build**:
+- Balance resource consumption rates
+- Add feedback (messages, pauses)
+- Title screen
+- Controls help screen
+- Optional sound effects
+**Testing**: Play complete loop multiple times
+**Tokens**: ~100
+
+---
+
+## TOKEN BUDGET
+
+Phase 0: 50 tokens (COMPLETE)
+Phases 1-10: ~1060 tokens remaining
+TOTAL: ~1110 tokens (~3.5% of 32KB limit)
+
+---
+
+## PICO-8 KEY CONCEPTS
+
+**The Three Sacred Functions**:
+- _init() - Runs once at start
+- _update() - Runs 30 times per second (logic)
+- _draw() - Runs 30 times per second (display)
+
+**Buttons**:
+- btnp(5) = X button (pressed this frame)
+- btn(5) = X button (held down)
+- 0=left, 1=right, 2=up, 3=down, 4=O, 5=X
+
+**Angles**:
+- Pico-8 uses 0.0-1.0 for full circle (not 0-360)
+- Convert: pico_angle = degrees / 360
+
+**Colors**:
+- 0=black, 6=light_gray, 7=white
+- 8=red, 10=yellow, 11=green, 12=blue
+
+---
+
+## CURRENT STATUS
+
+✅ Phase 0 complete - Multi-station skeleton working
+✅ Phase 1 complete - Resource display system
+✅ Phase 2 complete - Time system & resource drain
+✅ Phase 3 complete - Helm controls
+🔄 Next: Phase 4 - Submarine movement
+📊 Progress: 4/11 phases complete (36%)
+
+---
+
+## NOTES
+
+- Keep testing after each phase
+- Run cart in Pico-8 with: load aquanova.p8 then run
+- Check token count with Ctrl+P in editor
+- Commit to git after each working phase
+- Update README as features complete
