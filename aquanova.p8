@@ -41,9 +41,18 @@ sub = {
   depth = 0 -- meters 0-1200
 }
 
--- === field selection ===
-current_field = 1
-field_count = 1
+-- === ui button system ===
+input_mode = "navigate" -- "navigate" or "dpad_active"
+ui_buttons = {} -- table of buttons on current screen
+selected_button = 1 -- index of currently highlighted button
+
+-- button types and their behavior
+button_types = {
+  dpad = "dpad",
+  station = "station",
+  action = "action",
+  value = "value"
+}
 
 -- === map and locations ===
 world_size = 2000 -- world is 2000x2000 units
@@ -58,7 +67,7 @@ sample_sites = {
 
 -- sample collection
 samples_collected = 0
-collection_range = 20  -- units within which to collect
+collection_range = 5  -- units within which to collect
 
 -- waypoint system
 waypoint = {
@@ -76,7 +85,26 @@ cursor = {
 -- === initialization ===
 function _init()
   -- resources initialized above
-  update_field_count()
+  setup_station_buttons()
+end
+
+function setup_station_buttons()
+  -- setup buttons based on current station
+  ui_buttons = {}
+  selected_button = 1
+  input_mode = "navigate"
+
+  if gamestate == "helm" then
+    setup_helm_buttons()
+  elseif gamestate == "bridge" then
+    setup_bridge_buttons()
+  elseif gamestate == "science" then
+    setup_science_buttons()
+  elseif gamestate == "engineering" then
+    setup_engineering_buttons()
+  elseif gamestate == "quarters" then
+    setup_quarters_buttons()
+  end
 end
 
 -- === logic update loop (30 times a second) ===
@@ -88,137 +116,215 @@ function _update()
 end
 
 function handle_input()
-  -- field navigation (up/down)
-  if btnp(2) then -- up arrow
-    current_field -= 1
-    if current_field < 1 then
-      current_field = field_count
-    end
-  elseif btnp(3) then -- down arrow
-    current_field += 1
-    if current_field > field_count then
-      current_field = 1
-    end
-  end
-
-  -- field value adjustment (left/right)
-  if btnp(0) or btnp(1) then
-    if gamestate == "helm" then
-      handle_helm_fields()
-    elseif gamestate == "bridge" then
-      handle_bridge_fields()
-    elseif gamestate == "quarters" then
-      handle_quarters_fields()
-    elseif gamestate == "science" then
-      handle_science_fields()
-    elseif gamestate == "engineering" then
-      handle_engineering_fields()
-    end
-  end
-
-  -- x button (keyboard x): place waypoint on bridge
-  if btnp(5) and gamestate == "bridge" then
-    waypoint.x = cursor.x
-    waypoint.y = cursor.y
-    waypoint.active = true
+  if input_mode == "navigate" then
+    handle_navigation_input()
+  elseif input_mode == "dpad_active" then
+    handle_dpad_input()
   end
 end
 
-function handle_helm_fields()
-  if current_field == 1 then -- station
-    cycle_station()
-  elseif current_field == 2 then -- heading
-    if btnp(1) then -- right
-      sub.heading += 15
-      if sub.heading >= 360 then sub.heading -= 360 end
-    else -- left
+function handle_navigation_input()
+  -- arrow keys navigate between ui buttons
+  if btnp(2) then -- up arrow
+    selected_button -= 1
+    if selected_button < 1 then
+      selected_button = #ui_buttons
+    end
+  elseif btnp(3) then -- down arrow
+    selected_button += 1
+    if selected_button > #ui_buttons then
+      selected_button = 1
+    end
+  elseif btnp(0) then -- left arrow
+    selected_button -= 1
+    if selected_button < 1 then
+      selected_button = #ui_buttons
+    end
+  elseif btnp(1) then -- right arrow
+    selected_button += 1
+    if selected_button > #ui_buttons then
+      selected_button = 1
+    end
+  end
+
+  -- x button activates selected button
+  if btnp(5) then -- x key
+    activate_button(ui_buttons[selected_button])
+  end
+end
+
+function handle_dpad_input()
+  -- when dpad is active, arrows control the dpad
+  local dpad_btn = ui_buttons[selected_button]
+
+  if dpad_btn and dpad_btn.type == "dpad" then
+    -- call the button's action with direction
+    if btnp(2) then -- up
+      if dpad_btn.on_up then dpad_btn.on_up() end
+    elseif btnp(3) then -- down
+      if dpad_btn.on_down then dpad_btn.on_down() end
+    elseif btnp(0) then -- left
+      if dpad_btn.on_left then dpad_btn.on_left() end
+    elseif btnp(1) then -- right
+      if dpad_btn.on_right then dpad_btn.on_right() end
+    end
+
+    -- x button is action button when dpad active
+    if btnp(5) then -- x key
+      if dpad_btn.on_action then dpad_btn.on_action() end
+    end
+
+    -- z button deactivates dpad
+    if btnp(4) then -- z key
+      input_mode = "navigate"
+    end
+  end
+end
+
+function activate_button(btn)
+  if not btn then return end
+
+  if btn.type == "dpad" then
+    -- activate dpad mode
+    input_mode = "dpad_active"
+  elseif btn.type == "station" then
+    -- cycle station
+    if btn.on_press then btn.on_press() end
+  elseif btn.type == "action" then
+    -- perform action
+    if btn.on_press then btn.on_press() end
+  elseif btn.type == "value" then
+    -- toggle or cycle value
+    if btn.on_press then btn.on_press() end
+  end
+end
+
+-- === button setup functions ===
+function setup_helm_buttons()
+  add(ui_buttons, {
+    type = "station",
+    x = 26, y = 122,
+    label = "station",
+    on_press = cycle_station
+  })
+
+  add(ui_buttons, {
+    type = "dpad",
+    x = 18, y = 60,
+    label = "heading",
+    sprite = 0, -- sprite index for dpad
+    on_left = function()
       sub.heading -= 15
       if sub.heading < 0 then sub.heading += 360 end
+    end,
+    on_right = function()
+      sub.heading += 15
+      if sub.heading >= 360 then sub.heading -= 360 end
     end
-  elseif current_field == 3 then -- speed
-    if btnp(1) then -- right
+  })
+
+  add(ui_buttons, {
+    type = "dpad",
+    x = 56, y = 60,
+    label = "speed",
+    sprite = 0,
+    on_up = function()
       sub.speed += 10
       if sub.speed > 160 then sub.speed = 160 end
-    else -- left
+    end,
+    on_down = function()
       sub.speed -= 10
       if sub.speed < 0 then sub.speed = 0 end
     end
-  elseif current_field == 4 then -- depth
-    if btnp(1) then -- right
-      sub.depth += 50
-      if sub.depth > 1200 then sub.depth = 1200 end
-    else -- left
+  })
+
+  add(ui_buttons, {
+    type = "dpad",
+    x = 94, y = 60,
+    label = "depth",
+    sprite = 0,
+    on_up = function()
       sub.depth -= 50
       if sub.depth < 0 then sub.depth = 0 end
+    end,
+    on_down = function()
+      sub.depth += 50
+      if sub.depth > 1200 then sub.depth = 1200 end
     end
-  end
+  })
 end
 
-function handle_bridge_fields()
-  if current_field == 1 then -- station
-    cycle_station()
-  elseif current_field == 2 then -- cursor x (lat)
-    if btnp(1) then -- right
-      cursor.x += 100
-      if cursor.x > 1000 then cursor.x = 1000 end
-    else -- left
+function setup_bridge_buttons()
+  add(ui_buttons, {
+    type = "station",
+    x = 26, y = 122,
+    label = "station",
+    on_press = cycle_station
+  })
+
+  add(ui_buttons, {
+    type = "dpad",
+    x = 16, y = 50,
+    label = "cursor",
+    sprite = 0,
+    on_left = function()
       cursor.x -= 100
       if cursor.x < -1000 then cursor.x = -1000 end
-    end
-  elseif current_field == 3 then -- cursor y (lon)
-    if btnp(1) then -- right
+    end,
+    on_right = function()
+      cursor.x += 100
+      if cursor.x > 1000 then cursor.x = 1000 end
+    end,
+    on_up = function()
       cursor.y += 100
       if cursor.y > 1000 then cursor.y = 1000 end
-    else -- left
+    end,
+    on_down = function()
       cursor.y -= 100
       if cursor.y < -1000 then cursor.y = -1000 end
+    end,
+    on_action = function()
+      waypoint.x = cursor.x
+      waypoint.y = cursor.y
+      waypoint.active = true
     end
-  end
+  })
 end
 
-function handle_quarters_fields()
-  if current_field == 1 then -- station
-    cycle_station()
-  end
+function setup_science_buttons()
+  add(ui_buttons, {
+    type = "station",
+    x = 26, y = 122,
+    label = "station",
+    on_press = cycle_station
+  })
 end
 
-function handle_science_fields()
-  if current_field == 1 then -- station
-    cycle_station()
-  end
+function setup_engineering_buttons()
+  add(ui_buttons, {
+    type = "station",
+    x = 26, y = 122,
+    label = "station",
+    on_press = cycle_station
+  })
 end
 
-function handle_engineering_fields()
-  if current_field == 1 then -- station
-    cycle_station()
-  end
+function setup_quarters_buttons()
+  add(ui_buttons, {
+    type = "station",
+    x = 26, y = 122,
+    label = "station",
+    on_press = cycle_station
+  })
 end
 
 function cycle_station()
-  if btnp(0) then -- left
-    station_index -= 1
-    if station_index < 1 then
-      station_index = #stations
-    end
-  else -- right
-    station_index += 1
-    if station_index > #stations then
-      station_index = 1
-    end
+  station_index += 1
+  if station_index > #stations then
+    station_index = 1
   end
   gamestate = stations[station_index]
-  current_field = 1
-  update_field_count()
-end
-
-function update_field_count()
-  if gamestate == "helm" then
-    field_count = 4
-  elseif gamestate == "bridge" then
-    field_count = 3
-  else
-    field_count = 1
-  end
+  setup_station_buttons()
 end
 
 function update_time()
@@ -260,10 +366,13 @@ function update_movement()
       sub.speed = 0  -- stop when arriving at waypoint
     else
       -- calculate desired heading to waypoint
-      -- atan2 returns pico-8 angle (0.0-1.0) where 0=east
-      -- convert to our heading (0=north) by adding 90
+      -- movement: angle = (heading-90)/360, dx=cos(angle), dy=sin(angle)
+      -- reverse: heading = atan2(dy,dx)*360 + 90
+      -- but atan2 seems inverted, try subtracting instead
       local desired_angle = atan2(dy, dx)
-      local desired_heading = (desired_angle * 360 + 90) % 360
+      local desired_heading = desired_angle * 360 - 90
+      if desired_heading >= 360 then desired_heading -= 360 end
+      if desired_heading < 0 then desired_heading += 360 end
 
       -- gradually adjust heading toward waypoint
       local heading_diff = desired_heading - sub.heading
@@ -320,6 +429,72 @@ function update_sample_collection()
       end
     end
   end
+end
+
+-- === button drawing ===
+function draw_button(btn, is_selected)
+  local color = 6 -- gray when not selected
+  local state = "normal"
+
+  if is_selected then
+    if input_mode == "dpad_active" and btn.type == "dpad" then
+      state = "active"
+      color = 11
+    else
+      state = "selected"
+      color = 7
+    end
+  end
+
+  -- draw button based on type
+  if btn.type == "dpad" then
+    draw_dpad_sprite(btn.x, btn.y, state)
+  elseif btn.type == "station" then
+    -- draw as text button
+    local prefix = " "
+    if is_selected then prefix = ">" end
+    print(prefix .. btn.label .. ": " .. gamestate, btn.x, btn.y, color)
+  elseif btn.type == "action" then
+    -- draw action button
+    rect(btn.x, btn.y, btn.x+20, btn.y+10, color)
+    print(btn.label, btn.x+2, btn.y+2, color)
+  end
+end
+
+function draw_dpad_sprite(x, y, state)
+  -- state: "normal", "selected", or "active"
+  -- determine sprite indices based on state
+  local left_spr, right_spr, up_spr, down_spr, center_spr
+
+  if state == "normal" then
+    -- deselected sprites (6-10)
+    up_spr = 6
+    down_spr = 7
+    left_spr = 8
+    right_spr = 9
+    center_spr = 10
+  elseif state == "active" then
+    -- pressed sprites (11-15)
+    up_spr = 11
+    down_spr = 12
+    left_spr = 13
+    right_spr = 14
+    center_spr = 15
+  else -- "selected"
+    -- selected sprites (1-5)
+    up_spr = 1
+    down_spr = 2
+    left_spr = 3
+    right_spr = 4
+    center_spr = 5
+  end
+
+  -- draw 5 sprites in cross pattern with 1px spacing
+  spr(up_spr, x, y-9)        -- up
+  spr(down_spr, x, y+9)      -- down
+  spr(left_spr, x-9, y)      -- left
+  spr(right_spr, x+9, y)     -- right
+  spr(center_spr, x, y)      -- center
 end
 
 -- === helper functions ===
@@ -384,14 +559,6 @@ end
 function draw_bridge()
   print("tactical map", 36, 6, 7)
 
-  local y = 17
-
-  -- cursor position fields
-  draw_field(3, "lat", format_lat(cursor.y), 13, y)
-  y += 6
-  draw_field(2, "lon", format_lon(cursor.x), 13, y)
-  y += 10
-
   -- draw map border
   rect(15, 15, 113, 113, 12)
 
@@ -438,14 +605,17 @@ function draw_bridge()
   local hy = sub_y - sin(heading_angle) * 4  -- negate because screen Y is flipped
   line(sub_x, sub_y, hx, hy, 7)
 
-  -- display info below map
-  print("x to set waypoint", 26, 116, 6)
-  if waypoint.active then
-    print("navigating...", 32, 100, 11)
-  end
+  -- cursor position info
+  print("cursor: " .. cursor.x .. "," .. cursor.y, 2, 13, 6)
 
-  -- station field at bottom
-  draw_field(1, "station", gamestate, 26, 122)
+  -- draw d-pad control on left side
+  print("cursor dpad", 2, 40, 6)
+  draw_ui_buttons()
+
+  if waypoint.active then
+    print("navigating...", 2, 100, 11)
+  end
+  print("x=set waypoint", 2, 106, 6)
 end
 
 function draw_helm()
@@ -454,41 +624,43 @@ function draw_helm()
   local y = 25
 
   -- display position
-  print("position: " .. format_lat(sub.y) .. " - " .. format_lon(sub.x), 10, y, 7)
-  y += 15
-
-  -- field 2: heading
-  local compass = {"n", "ne", "e", "se", "s", "sw", "w", "nw"}
-  local dir_idx = flr((sub.heading + 22.5) / 45) % 8 + 1
-  draw_field(2, "heading", sub.heading .. "deg " .. compass[dir_idx], 10, y)
-  y += 15
-
-  -- field 3: speed
-  draw_field(3, "speed", sub.speed .. " knots", 10, y)
-  y += 15
-
-  -- field 4: depth
-  draw_field(4, "depth", sub.depth .. " m", 10, y)
+  print("position", 10, y, 6)
+  print("x: " .. flr(sub.x) .. " y: " .. flr(sub.y), 10, y+6, 7)
   y += 20
 
-  -- controls help
-  print("up/down: cycle field", 8, y, 6)
-  print("left/right: adjust value", 8, y+8, 6)
+  -- display current values above dpads
+  local compass = {"n", "ne", "e", "se", "s", "sw", "w", "nw"}
+  local dir_idx = flr((sub.heading + 22.5) / 45) % 8 + 1
 
-  -- station field at bottom
-  draw_field(1, "station", gamestate, 26, 122)
+  print("heading", 10, y, 6)
+  print(sub.heading .. " " .. compass[dir_idx], 10, y+6, 7)
+
+  print("speed", 60, y, 6)
+  print(sub.speed .. " kts", 60, y+6, 7)
+
+  print("depth", 95, y, 6)
+  print(sub.depth .. " m", 95, y+6, 7)
+
+  -- draw buttons (dpads will be drawn below labels)
+  draw_ui_buttons()
+
+  -- controls help
+  print("arrows: navigate/use", 8, 105, 6)
+  print("x: select/action", 8, 111, 6)
+  print("z: deactivate dpad", 8, 117, 6)
 end
 
-function draw_field(field_num, label, value, x, y)
-  local color = 6 -- gray when not selected
-  local prefix = " "
-
-  if current_field == field_num then
-    color = 7 -- white when selected
-    prefix = ">"
+function draw_ui_buttons()
+  -- draw all buttons for current screen
+  for i, btn in pairs(ui_buttons) do
+    local is_selected = (i == selected_button)
+    draw_button(btn, is_selected)
   end
 
-  print(prefix .. label .. ": " .. value, x, y, color)
+  -- show mode indicator
+  if input_mode == "dpad_active" then
+    print("dpad active (z to exit)", 20, 1, 11)
+  end
 end
 
 function draw_science()
@@ -512,8 +684,8 @@ function draw_science()
     y += 8
   end
 
-  -- station field at bottom
-  draw_field(1, "station", gamestate, 26, 122)
+  -- draw buttons
+  draw_ui_buttons()
 end
 
 function draw_engineering()
@@ -522,8 +694,8 @@ function draw_engineering()
   local y = 30
   print("(power management soon)", 12, y, 6)
 
-  -- station field at bottom
-  draw_field(1, "station", gamestate, 26, 122)
+  -- draw buttons
+  draw_ui_buttons()
 end
 
 function draw_quarters()
@@ -570,13 +742,15 @@ function draw_quarters()
     print("game over", 35, 116, 8)
   end
 
-  -- station field at bottom
-  draw_field(1, "station", gamestate, 26, 122)
+  -- draw buttons
+  draw_ui_buttons()
 end
 __gfx__
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00700700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00077000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00077000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00700700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000770000777777000077070070770000077770000066000066666600006606006066000006666000007700007777770000770700707700000777700
+0000000000777700770dd07700770007700077000700007000666600660dd06600660006600066000600006000777700770cc077007700077000770007000070
+007007000770077000dddd000770dd0770dd0770700dd0070660066000dddd000660dd0660dd0660600dd0060770077000cccc000770cc0770cc0770700cc007
+00077000770dd07700dddd00770dddd77dddd07770dddd07660dd06600dddd00660dddd66dddd06660dddd06770cc07700cccc00770cccc77cccc07770cccc07
+0007700070dddd07770dd077770dddd77dddd07770dddd0760dddd06660dd066660dddd66dddd06660dddd0670cccc07770cc077770cccc77cccc07770cccc07
+0070070000dddd00077007700770dd0770dd0770700dd00700dddd00066006600660dd0660dd0660600dd00600cccc00077007700770cc0770cc0770700cc007
+00000000700dd00700777700007700077000770007000070600dd00600666600006600066000660006000060700cc00700777700007700077000770007000070
+00000000077777700007700000077070070770000077770006666660000660000006606006066000006666000777777000077000000770700707700000777700
