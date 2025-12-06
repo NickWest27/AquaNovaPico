@@ -56,6 +56,19 @@ sample_sites = {
   {x=300, y=-500, collected=false}
 }
 
+-- waypoint system
+waypoint = {
+  x = 0,
+  y = 0,
+  active = false
+}
+
+-- cursor for bridge map
+cursor = {
+  x = 0,
+  y = 0
+}
+
 -- === initialization ===
 function _init()
   -- resources initialized above
@@ -97,6 +110,13 @@ function handle_input()
       handle_engineering_fields()
     end
   end
+
+  -- x button: place waypoint on bridge
+  if btnp(4) and gamestate == "bridge" then
+    waypoint.x = cursor.x
+    waypoint.y = cursor.y
+    waypoint.active = true
+  end
 end
 
 function handle_helm_fields()
@@ -132,6 +152,22 @@ end
 function handle_bridge_fields()
   if current_field == 1 then -- station
     cycle_station()
+  elseif current_field == 2 then -- cursor x (lat)
+    if btnp(1) then -- right
+      cursor.x += 100
+      if cursor.x > 1000 then cursor.x = 1000 end
+    else -- left
+      cursor.x -= 100
+      if cursor.x < -1000 then cursor.x = -1000 end
+    end
+  elseif current_field == 3 then -- cursor y (lon)
+    if btnp(1) then -- right
+      cursor.y += 100
+      if cursor.y > 1000 then cursor.y = 1000 end
+    else -- left
+      cursor.y -= 100
+      if cursor.y < -1000 then cursor.y = -1000 end
+    end
   end
 end
 
@@ -173,6 +209,8 @@ end
 function update_field_count()
   if gamestate == "helm" then
     field_count = 4
+  elseif gamestate == "bridge" then
+    field_count = 3
   else
     field_count = 1
   end
@@ -205,6 +243,43 @@ function update_time()
 end
 
 function update_movement()
+  -- auto-navigate to waypoint if active
+  if waypoint.active then
+    local dx = waypoint.x - sub.x
+    local dy = waypoint.y - sub.y
+    local dist = sqrt(dx * dx + dy * dy)
+
+    -- check if arrived
+    if dist < 10 then
+      waypoint.active = false
+    else
+      -- calculate desired heading to waypoint
+      local desired_angle = atan2(dy, dx)
+      local desired_heading = desired_angle * 360
+
+      -- gradually adjust heading toward waypoint
+      local heading_diff = desired_heading - sub.heading
+      -- normalize to -180 to 180
+      if heading_diff > 180 then heading_diff -= 360 end
+      if heading_diff < -180 then heading_diff += 360 end
+
+      -- adjust heading (5 degrees per frame max turn rate)
+      if abs(heading_diff) > 5 then
+        if heading_diff > 0 then
+          sub.heading += 5
+        else
+          sub.heading -= 5
+        end
+      else
+        sub.heading = desired_heading
+      end
+
+      -- wrap heading
+      if sub.heading >= 360 then sub.heading -= 360 end
+      if sub.heading < 0 then sub.heading += 360 end
+    end
+  end
+
   -- convert heading (0-360 degrees) to pico-8 angle (0.0-1.0)
   local angle = sub.heading / 360
 
@@ -248,23 +323,27 @@ function _draw()
   end
 
   -- draw station name at top
-  print("=== " .. gamestate .. " ===", 32, 2, 7)
+  print("=== " .. gamestate .. " ===", 32, 0, 7)
 end
 
 -- === station screens ===
 function draw_bridge()
-  print("tactical map", 34, 12, 7)
+  print("tactical map", 36, 6, 7)
 
-  local y = 25
-  draw_field(1, "station", gamestate, 10, y)
-  y += 15
+  local y = 17
+
+  -- cursor position fields
+  draw_field(2, "lon", cursor.x, 13, y)
+  y += 6
+  draw_field(3, "lat", cursor.y, 13, y)
+  y += 10
 
   -- draw map border
-  rect(15, 15, 113, 113, 6)
+  rect(15, 15, 113, 113, 12)
 
   -- draw grid lines
-  line(64, 15, 64, 113, 1) -- vertical center
-  line(15, 64, 113, 64, 1) -- horizontal center
+  line(64, 15, 64, 113, 5) -- vertical center
+  line(15, 64, 113, 64, 5) -- horizontal center
 
   -- draw port at (0,0)
   local port_x, port_y = world_to_screen(0, 0)
@@ -280,6 +359,21 @@ function draw_bridge()
     end
   end
 
+  -- draw waypoint if active
+  if waypoint.active then
+    local wx, wy = world_to_screen(waypoint.x, waypoint.y)
+    circfill(wx, wy, 3, 11)
+    print("w", wx-1, wy-1, 0)
+  end
+
+  -- draw cursor
+  local cx, cy = world_to_screen(cursor.x, cursor.y)
+  rect(cx-3, cy-3, cx+3, cy+3, 7)
+  line(cx-5, cy, cx-3, cy, 7) -- left
+  line(cx+3, cy, cx+5, cy, 7) -- right
+  line(cx, cy-5, cx, cy-3, 7) -- up
+  line(cx, cy+3, cx, cy+5, 7) -- down
+
   -- draw submarine
   local sub_x, sub_y = world_to_screen(sub.x, sub.y)
   circfill(sub_x, sub_y, 2, 8)
@@ -290,22 +384,24 @@ function draw_bridge()
   local hy = sub_y + sin(heading_angle) * 4
   line(sub_x, sub_y, hx, hy, 7)
 
-  -- display coordinates below map
-  print("pos: " .. flr(sub.x) .. ", " .. flr(sub.y), 16, 116, 6)
+  -- display info below map
+  print("x to set waypoint", 26, 116, 6)
+  if waypoint.active then
+    print("navigating...", 32, 100, 11)
+  end
+
+  -- station field at bottom
+  draw_field(1, "station", gamestate, 26, 122)
 end
 
 function draw_helm()
   print("helm controls", 32, 12, 7)
 
-  local y = 30
-
-  -- field 1: station
-  draw_field(1, "station", gamestate, 10, y)
-  y += 15
+  local y = 25
 
   -- display position
   print("position: x: " .. flr(sub.x) .. " y: " .. flr(sub.y), 10, y, 7)
-  y += 10
+  y += 15
 
   -- field 2: heading
   local compass = {"n", "ne", "e", "se", "s", "sw", "w", "nw"}
@@ -324,48 +420,47 @@ function draw_helm()
   -- controls help
   print("up/down: cycle field", 8, y, 6)
   print("left/right: adjust value", 8, y+8, 6)
+
+  -- station field at bottom
+  draw_field(1, "station", gamestate, 26, 122)
 end
 
 function draw_field(field_num, label, value, x, y)
   local color = 6 -- gray when not selected
   local prefix = " "
-  local suffix = " "
 
   if current_field == field_num then
     color = 7 -- white when selected
     prefix = ">"
-    suffix = "<"
   end
 
-  print(prefix .. label .. ": " .. value .. suffix, x, y, color)
+  print(prefix .. label .. ": " .. value, x, y, color)
 end
 
 function draw_science()
   print("science", 42, 12, 7)
 
   local y = 30
-  draw_field(1, "station", gamestate, 10, y)
-
-  y += 20
   print("(sample analysis soon)", 16, y, 6)
+
+  -- station field at bottom
+  draw_field(1, "station", gamestate, 26, 122)
 end
 
 function draw_engineering()
   print("engineering", 34, 12, 7)
 
   local y = 30
-  draw_field(1, "station", gamestate, 10, y)
-
-  y += 20
   print("(power management soon)", 12, y, 6)
+
+  -- station field at bottom
+  draw_field(1, "station", gamestate, 26, 122)
 end
 
 function draw_quarters()
   print("captain's quarters", 16, 12, 7)
 
   local y = 25
-  draw_field(1, "station", gamestate, 10, y)
-  y += 15
 
   -- display mission clock (day and time)
   local hour_str = current_hour
@@ -403,8 +498,11 @@ function draw_quarters()
   -- game over warning
   if resources.food <= 0 then
     print("out of food!", 30, 110, 8)
-    print("game over", 35, 118, 8)
+    print("game over", 35, 116, 8)
   end
+
+  -- station field at bottom
+  draw_field(1, "station", gamestate, 26, 122)
 end
 __gfx__
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
