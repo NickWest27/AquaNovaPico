@@ -56,6 +56,10 @@ sample_sites = {
   {x=300, y=-500, collected=false}
 }
 
+-- sample collection
+samples_collected = 0
+collection_range = 20  -- units within which to collect
+
 -- waypoint system
 waypoint = {
   x = 0,
@@ -75,11 +79,12 @@ function _init()
   update_field_count()
 end
 
--- === update loop (30 times a second) ===
+-- === logic update loop (30 times a second) ===
 function _update()
   handle_input()
   update_time()
   update_movement()
+  update_sample_collection()
 end
 
 function handle_input()
@@ -111,8 +116,8 @@ function handle_input()
     end
   end
 
-  -- x button: place waypoint on bridge
-  if btnp(4) and gamestate == "bridge" then
+  -- x button (keyboard x): place waypoint on bridge
+  if btnp(5) and gamestate == "bridge" then
     waypoint.x = cursor.x
     waypoint.y = cursor.y
     waypoint.active = true
@@ -252,10 +257,13 @@ function update_movement()
     -- check if arrived
     if dist < 10 then
       waypoint.active = false
+      sub.speed = 0  -- stop when arriving at waypoint
     else
       -- calculate desired heading to waypoint
+      -- atan2 returns pico-8 angle (0.0-1.0) where 0=east
+      -- convert to our heading (0=north) by adding 90
       local desired_angle = atan2(dy, dx)
-      local desired_heading = desired_angle * 360
+      local desired_heading = (desired_angle * 360 + 90) % 360
 
       -- gradually adjust heading toward waypoint
       local heading_diff = desired_heading - sub.heading
@@ -281,28 +289,74 @@ function update_movement()
   end
 
   -- convert heading (0-360 degrees) to pico-8 angle (0.0-1.0)
-  local angle = sub.heading / 360
+  -- heading: 0=north, 90=east, 180=south, 270=west
+  -- pico-8: 0=east, 0.25=south, 0.5=west, 0.75=north
+  local angle = (sub.heading - 90) / 360
 
   -- calculate velocity based on heading and speed
   -- speed is in knots, scale by time (1 frame at 60 knots = 1 unit per 30 frames)
   local speed_scale = sub.speed / 30
 
-  -- pico-8 cos/sin: 0=right, 0.25=down, 0.5=left, 0.75=up
   local dx = cos(angle) * speed_scale
-  local dy = sin(angle) * speed_scale
+  local dy = sin(angle) * speed_scale  -- positive because world Y+ = north (lat increases upward)
 
   -- update submarine position
   sub.x += dx
   sub.y += dy
 end
 
+function update_sample_collection()
+  -- check if near any uncollected sample sites
+  for site in all(sample_sites) do
+    if not site.collected then
+      local dx = site.x - sub.x
+      local dy = site.y - sub.y
+      local dist = sqrt(dx * dx + dy * dy)
+
+      if dist < collection_range then
+        site.collected = true
+        samples_collected += 1
+        resources.money += 100  -- reward for sample
+      end
+    end
+  end
+end
+
 -- === helper functions ===
 function world_to_screen(world_x, world_y)
   -- convert world coordinates to screen coordinates
   -- map is centered on screen at (16, 16) to (112, 112)
+  -- world: x=longitude (+ east, - west), y=latitude (+ north, - south)
+  -- screen: y increases downward, so flip y axis
   local screen_x = 16 + (world_x / world_size + 0.5) * map_size
-  local screen_y = 16 + (world_y / world_size + 0.5) * map_size
+  local screen_y = 16 + (-world_y / world_size + 0.5) * map_size
   return screen_x, screen_y
+end
+
+function format_lat(y)
+  -- convert latitude to N/S degrees and minutes
+  local dir = "n"
+  local val = y
+  if y < 0 then
+    dir = "s"
+    val = -y
+  end
+  local deg = flr(val / 10)
+  local min = flr((val % 10) * 6)
+  return dir .. deg .. "'" .. min .. "\""
+end
+
+function format_lon(x)
+  -- convert longitude to E/W degrees and minutes
+  local dir = "e"
+  local val = x
+  if x < 0 then
+    dir = "w"
+    val = -x
+  end
+  local deg = flr(val / 10)
+  local min = flr((val % 10) * 6)
+  return dir .. deg .. "'" .. min .. "\""
 end
 
 -- === draw loop (30fps) ===
@@ -333,9 +387,9 @@ function draw_bridge()
   local y = 17
 
   -- cursor position fields
-  draw_field(2, "lon", cursor.x, 13, y)
+  draw_field(3, "lat", format_lat(cursor.y), 13, y)
   y += 6
-  draw_field(3, "lat", cursor.y, 13, y)
+  draw_field(2, "lon", format_lon(cursor.x), 13, y)
   y += 10
 
   -- draw map border
@@ -379,9 +433,9 @@ function draw_bridge()
   circfill(sub_x, sub_y, 2, 8)
 
   -- draw heading indicator
-  local heading_angle = sub.heading / 360
+  local heading_angle = (sub.heading - 90) / 360
   local hx = sub_x + cos(heading_angle) * 4
-  local hy = sub_y + sin(heading_angle) * 4
+  local hy = sub_y - sin(heading_angle) * 4  -- negate because screen Y is flipped
   line(sub_x, sub_y, hx, hy, 7)
 
   -- display info below map
@@ -400,7 +454,7 @@ function draw_helm()
   local y = 25
 
   -- display position
-  print("position: x: " .. flr(sub.x) .. " y: " .. flr(sub.y), 10, y, 7)
+  print("position: " .. format_lat(sub.y) .. " - " .. format_lon(sub.x), 10, y, 7)
   y += 15
 
   -- field 2: heading
@@ -441,7 +495,22 @@ function draw_science()
   print("science", 42, 12, 7)
 
   local y = 30
-  print("(sample analysis soon)", 16, y, 6)
+  print("samples collected", 18, y, 7)
+  y += 8
+  print(samples_collected .. " / " .. #sample_sites, 40, y, 11)
+  y += 15
+
+  -- list sample sites
+  for i, site in pairs(sample_sites) do
+    local status = "uncollected"
+    local col = 8
+    if site.collected then
+      status = "collected"
+      col = 11
+    end
+    print("site " .. i .. ": " .. status, 10, y, col)
+    y += 8
+  end
 
   -- station field at bottom
   draw_field(1, "station", gamestate, 26, 122)
