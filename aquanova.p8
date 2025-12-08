@@ -76,10 +76,10 @@ waypoint = {
   active = false
 }
 
--- cursor for bridge map
+-- cursor for bridge map (screen coordinates)
 cursor = {
-  x = 0,
-  y = 0
+  x = 47,  -- start at submarine position
+  y = 64
 }
 
 -- === initialization ===
@@ -187,6 +187,12 @@ function activate_button(btn)
   if btn.type == "dpad" then
     -- activate dpad mode
     input_mode = "dpad_active"
+
+    -- reset cursor to submarine position when activating cursor dpad
+    if btn.label == "cursor" then
+      cursor.x = 47
+      cursor.y = 64
+    end
   elseif btn.type == "station" then
     -- cycle station
     if btn.on_press then btn.on_press() end
@@ -268,24 +274,26 @@ function setup_bridge_buttons()
     label = "cursor",
     sprite = 0,
     on_left = function()
-      cursor.x -= 100
-      if cursor.x < -1000 then cursor.x = -1000 end
+      cursor.x -= 5
+      if cursor.x < 0 then cursor.x = 0 end
     end,
     on_right = function()
-      cursor.x += 100
-      if cursor.x > 1000 then cursor.x = 1000 end
+      cursor.x += 5
+      if cursor.x > 96 then cursor.x = 96 end
     end,
     on_up = function()
-      cursor.y += 100
-      if cursor.y > 1000 then cursor.y = 1000 end
+      cursor.y -= 5
+      if cursor.y < 0 then cursor.y = 0 end
     end,
     on_down = function()
-      cursor.y -= 100
-      if cursor.y < -1000 then cursor.y = -1000 end
+      cursor.y += 5
+      if cursor.y > 96 then cursor.y = 96 end
     end,
     on_action = function()
-      waypoint.x = cursor.x
-      waypoint.y = cursor.y
+      -- convert screen cursor to world waypoint
+      local world_x, world_y = screen_to_world(cursor.x, cursor.y)
+      waypoint.x = world_x
+      waypoint.y = world_y
       waypoint.active = true
     end
   })
@@ -499,13 +507,67 @@ end
 
 -- === helper functions ===
 function world_to_screen(world_x, world_y)
-  -- convert world coordinates to screen coordinates
-  -- map is centered on screen at (16, 16) to (112, 112)
+  -- submarine is fixed at screen position (47, 64)
+  -- world scrolls around submarine
   -- world: x=longitude (+ east, - west), y=latitude (+ north, - south)
-  -- screen: y increases downward, so flip y axis
-  local screen_x = 16 + (world_x / world_size + 0.5) * map_size
-  local screen_y = 16 + (-world_y / world_size + 0.5) * map_size
+  -- screen: y increases downward, so flip y axis for latitude
+
+  -- calculate offset from submarine in world units
+  local dx = world_x - sub.x
+  local dy = world_y - sub.y
+
+  -- convert to screen pixels (scale factor = map_size / world_size)
+  local scale = map_size / world_size
+  local screen_x = 47 + dx * scale
+  local screen_y = 64 - dy * scale  -- negative because screen Y is inverted
+
   return screen_x, screen_y
+end
+
+function screen_to_world(screen_x, screen_y)
+  -- inverse of world_to_screen
+  -- convert screen position to world coordinates
+  local scale = map_size / world_size
+  local world_x = sub.x + (screen_x - 47) / scale
+  local world_y = sub.y - (screen_y - 64) / scale  -- negative for Y inversion
+  return world_x, world_y
+end
+
+function draw_corner_mask()
+  -- fill triangular corner mask
+  -- covers area above diagonal from (0,32) to (32,0)
+  for y=0,31 do
+    line(0, y, 32-y, y, 11)
+  end
+end
+
+function draw_rotated_sub(x, y, heading)
+  -- draw submarine triangle pointing in direction of heading
+  -- heading: 0=north, 90=east, 180=south, 270=west
+  -- convert heading to pico-8 angle (0.0-1.0)
+  local angle = (heading - 90) / 360
+
+  -- define triangle points relative to center
+  -- nose points forward, base is stern
+  local nose_dist = 4
+  local base_dist = 3
+  local base_width = 2
+
+  -- calculate nose point (forward)
+  local nose_x = x + cos(angle) * nose_dist
+  local nose_y = y + sin(angle) * nose_dist
+
+  -- calculate base points (stern, perpendicular to heading)
+  local perp_angle = angle + 0.25  -- perpendicular angle
+  local base1_x = x - cos(angle) * base_dist + cos(perp_angle) * base_width
+  local base1_y = y - sin(angle) * base_dist + sin(perp_angle) * base_width
+  local base2_x = x - cos(angle) * base_dist - cos(perp_angle) * base_width
+  local base2_y = y - sin(angle) * base_dist - sin(perp_angle) * base_width
+
+  -- draw triangle
+  line(nose_x, nose_y, base1_x, base1_y, 7)
+  line(nose_x, nose_y, base2_x, base2_y, 7)
+  line(base1_x, base1_y, base2_x, base2_y, 7)
 end
 
 -- === draw loop (30fps) ===
@@ -572,22 +634,25 @@ function draw_bridge()
     print("w", wx-1, wy-1, 0)
   end
 
-  -- draw cursor
-  local cx, cy = world_to_screen(cursor.x, cursor.y)
-  rect(cx-3, cy-3, cx+3, cy+3, 7)
-  line(cx-5, cy, cx-3, cy, 7) -- left
-  line(cx+3, cy, cx+5, cy, 7) -- right
-  line(cx, cy-5, cx, cy-3, 7) -- up
-  line(cx, cy+3, cx, cy+5, 7) -- down
+  -- draw cursor (only when cursor dpad is active)
+  if input_mode == "dpad_active" and selected_button == 2 then
+    local cx, cy = cursor.x, cursor.y
+    rect(cx-3, cy-3, cx+3, cy+3, 7)
+    line(cx-5, cy, cx-3, cy, 7) -- left
+    line(cx+3, cy, cx+5, cy, 7) -- right
+    line(cx, cy-5, cx, cy-3, 7) -- up
+    line(cx, cy+3, cx, cy+5, 7) -- down
+  end
 
-  -- draw submarine
-  local sub_x, sub_y = world_to_screen(sub.x, sub.y)
-  line(sub_x, sub_y, sub_x+2, sub_y+4, 7) -- right side
-  line(sub_x, sub_y, sub_x-2, sub_y+4, 7) -- left side
-  line(sub_x-2, sub_y+4, sub_x+2, sub_y+4, 7) -- stern
+  -- draw submarine (fixed at screen position)
+  draw_rotated_sub(47, 64, sub.heading)
 
-  -- cursor position info
-  print("cursor: " .. cursor.x .. "," .. cursor.y, 33, 1, 6)
+  -- cursor position info (show world coordinates)
+  local cursor_world_x, cursor_world_y = screen_to_world(cursor.x, cursor.y)
+  print("cursor: " .. flr(cursor_world_x) .. "," .. flr(cursor_world_y), 33, 1, 6)
+
+  -- draw corner mask
+  draw_corner_mask()
 
   -- draw map border
   line(32, 0, 96, 0, 12) -- top
