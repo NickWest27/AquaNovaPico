@@ -36,7 +36,7 @@ current_minute = 0
 sub = {
   x = 0,
   y = 0,
-  heading = 0, -- degrees 0-360
+  heading = 0, -- degrees 1-360 degrees True North
   speed = 0, -- knots 0-160
   depth = 0 -- meters 0-1200
 }
@@ -50,6 +50,13 @@ selected_button = 1 -- index of currently highlighted button
 button_types = {
   dpad = "dpad",
   station = "station",
+  simple_action = "simple_action",
+  up = "up",
+  down = "down",
+  left = "left",
+  left_big = "left_big",
+  right = "right",
+  right_big = "right_big",
   action = "action",
   value = "value"
 }
@@ -193,14 +200,12 @@ function activate_button(btn)
       cursor.x = 47
       cursor.y = 64
     end
-  elseif btn.type == "station" then
-    -- cycle station
+  elseif btn.type == "up" or btn.type == "down" or btn.type == "left" or
+         btn.type == "right" or btn.type == "action" or
+         btn.type == "left_big" or btn.type == "right_big" then
+    -- call on_press callback for sprite buttons
     if btn.on_press then btn.on_press() end
-  elseif btn.type == "action" then
-    -- perform action
-    if btn.on_press then btn.on_press() end
-  elseif btn.type == "value" then
-    -- toggle or cycle value
+  elseif btn.type == "station" or btn.type == "simple_action" or btn.type == "value" then
     if btn.on_press then btn.on_press() end
   end
 end
@@ -440,6 +445,48 @@ function update_sample_collection()
 end
 
 -- === button drawing ===
+function draw_button_sprite(x, y, type, state, label)
+  -- sprite mapping table
+  local sprite_map = {
+    up = {normal=6, selected=1, active=11},
+    down = {normal=7, selected=2, active=12},
+    left = {normal=8, selected=3, active=13},
+    right = {normal=9, selected=4, active=14},
+    action = {normal=10, selected=5, active=15},
+    left_big = {normal=8, selected=3, active=13},
+    right_big = {normal=9, selected=4, active=14}
+  }
+
+  -- get sprite number from map
+  local sprite_num = sprite_map[type][state]
+
+  -- check if this is a big button
+  if type == "left_big" or type == "right_big" then
+    -- calculate sprite sheet pixel position
+    local sx = (sprite_num % 16) * 8
+    local sy = flr(sprite_num / 16) * 8
+
+    -- draw stretched sprite (8x8 -> 16x8)
+    sspr(sx, sy, 8, 8, x, y, 16, 8)
+
+    -- draw label if provided
+    if label then
+      local text_color = 6 -- grey for normal
+      if state == "selected" or state == "active" then
+        text_color = 7 -- white for selected/active
+      end
+
+      -- center text over button
+      local text_x = x + 8 - (#label * 4) / 2
+      local text_y = y + 1
+      print(label, text_x, text_y, text_color)
+    end
+  else
+    -- regular 8x8 sprite button
+    spr(sprite_num, x, y)
+  end
+end
+
 function draw_button(btn, is_selected)
   local color = 6 -- gray when not selected
   local state = "normal"
@@ -457,52 +504,30 @@ function draw_button(btn, is_selected)
   -- draw button based on type
   if btn.type == "dpad" then
     draw_dpad_sprite(btn.x, btn.y, state)
+  elseif btn.type == "up" or btn.type == "down" or btn.type == "left" or
+         btn.type == "right" or btn.type == "action" then
+    draw_button_sprite(btn.x, btn.y, btn.type, state)
+  elseif btn.type == "left_big" or btn.type == "right_big" then
+    draw_button_sprite(btn.x, btn.y, btn.type, state, btn.label)
   elseif btn.type == "station" then
     -- draw as text button
     local prefix = " "
     if is_selected then prefix = ">" end
     print(prefix .. btn.label .. ": " .. station, btn.x, btn.y, color)
-  elseif btn.type == "action" then
-    -- draw action button
+  elseif btn.type == "simple_action" then
+    -- draw simple action button (rect-based)
     rect(btn.x, btn.y, btn.x+20, btn.y+10, color)
     print(btn.label, btn.x+2, btn.y+2, color)
   end
 end
 
 function draw_dpad_sprite(x, y, state)
-  -- state: "normal", "selected", or "active"
-  -- determine sprite indices based on state
-  local left_spr, right_spr, up_spr, down_spr, center_spr
-
-  if state == "normal" then
-    -- deselected sprites (6-10)
-    up_spr = 6
-    down_spr = 7
-    left_spr = 8
-    right_spr = 9
-    center_spr = 10
-  elseif state == "active" then
-    -- pressed sprites (11-15)
-    up_spr = 11
-    down_spr = 12
-    left_spr = 13
-    right_spr = 14
-    center_spr = 15
-  else -- "selected"
-    -- selected sprites (1-5)
-    up_spr = 1
-    down_spr = 2
-    left_spr = 3
-    right_spr = 4
-    center_spr = 5
-  end
-
   -- draw 5 sprites in cross pattern with 1px spacing
-  spr(up_spr, x, y-9)        -- up
-  spr(down_spr, x, y+9)      -- down
-  spr(left_spr, x-9, y)      -- left
-  spr(right_spr, x+9, y)     -- right
-  spr(center_spr, x, y)      -- center
+  draw_button_sprite(x, y-9, "up", state)      -- up
+  draw_button_sprite(x, y+9, "down", state)    -- down
+  draw_button_sprite(x-9, y, "left", state)    -- left
+  draw_button_sprite(x+9, y, "right", state)   -- right
+  draw_button_sprite(x, y, "action", state)    -- center
 end
 
 -- === helper functions ===
@@ -567,7 +592,7 @@ function draw_rotated_sub(x, y, heading)
   -- draw triangle
   line(nose_x, nose_y, base1_x, base1_y, 7)
   line(nose_x, nose_y, base2_x, base2_y, 7)
-  line(base1_x, base1_y, base2_x, base2_y, 7)
+  line(base1_x, base1_y, base2_x, base2_y, 8)
 end
 
 -- === draw loop (30fps) ===
