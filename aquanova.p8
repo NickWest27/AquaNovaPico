@@ -5,7 +5,7 @@ __lua__
 -- submarine strategy game
 
 -- === game state ===
-gamestate = "bridge"
+station = "bridge"
 station_index = 1
 stations = {
   "bridge",
@@ -94,15 +94,15 @@ function setup_station_buttons()
   selected_button = 1
   input_mode = "navigate"
 
-  if gamestate == "helm" then
+  if station == "helm" then
     setup_helm_buttons()
-  elseif gamestate == "bridge" then
+  elseif station == "bridge" then
     setup_bridge_buttons()
-  elseif gamestate == "science" then
+  elseif station == "science" then
     setup_science_buttons()
-  elseif gamestate == "engineering" then
+  elseif station == "engineering" then
     setup_engineering_buttons()
-  elseif gamestate == "quarters" then
+  elseif station == "quarters" then
     setup_quarters_buttons()
   end
 end
@@ -264,7 +264,7 @@ function setup_bridge_buttons()
 
   add(ui_buttons, {
     type = "dpad",
-    x = 16, y = 50,
+    x = 106, y = 106,
     label = "cursor",
     sprite = 0,
     on_left = function()
@@ -323,7 +323,7 @@ function cycle_station()
   if station_index > #stations then
     station_index = 1
   end
-  gamestate = stations[station_index]
+  station = stations[station_index]
   setup_station_buttons()
 end
 
@@ -453,7 +453,7 @@ function draw_button(btn, is_selected)
     -- draw as text button
     local prefix = " "
     if is_selected then prefix = ">" end
-    print(prefix .. btn.label .. ": " .. gamestate, btn.x, btn.y, color)
+    print(prefix .. btn.label .. ": " .. station, btn.x, btn.y, color)
   elseif btn.type == "action" then
     -- draw action button
     rect(btn.x, btn.y, btn.x+20, btn.y+10, color)
@@ -508,75 +508,60 @@ function world_to_screen(world_x, world_y)
   return screen_x, screen_y
 end
 
-function format_lat(y)
-  -- convert latitude to N/S degrees and minutes
-  local dir = "n"
-  local val = y
-  if y < 0 then
-    dir = "s"
-    val = -y
-  end
-  local deg = flr(val / 10)
-  local min = flr((val % 10) * 6)
-  return dir .. deg .. "'" .. min .. "\""
-end
-
-function format_lon(x)
-  -- convert longitude to E/W degrees and minutes
-  local dir = "e"
-  local val = x
-  if x < 0 then
-    dir = "w"
-    val = -x
-  end
-  local deg = flr(val / 10)
-  local min = flr((val % 10) * 6)
-  return dir .. deg .. "'" .. min .. "\""
-end
-
 -- === draw loop (30fps) ===
 function _draw()
   cls()
+  draw_dev_grid()
 
   -- draw current station
-  if gamestate == "bridge" then
+  if station == "bridge" then
     draw_bridge()
-  elseif gamestate == "helm" then
+  elseif station == "helm" then
     draw_helm()
-  elseif gamestate == "science" then
+  elseif station == "science" then
     draw_science()
-  elseif gamestate == "engineering" then
+  elseif station == "engineering" then
     draw_engineering()
-  elseif gamestate == "quarters" then
+  elseif station == "quarters" then
     draw_quarters()
   end
+end
 
-  -- draw station name at top
-  print("=== " .. gamestate .. " ===", 32, 0, 7)
+function draw_dev_grid()
+  -- draw development layout guidline grid
+  line(0, 32, 128, 32, 5)
+  line(0, 64, 128, 64, 5)
+  line(0, 96, 128, 96, 5)
+  line(32, 0, 32, 128, 5)
+  line(64, 0, 64, 128, 5)
+  line(96, 0, 96, 128, 5)
 end
 
 -- === station screens ===
 function draw_bridge()
-  print("tactical map", 36, 6, 7)
-
-  -- draw map border
-  rect(15, 15, 113, 113, 12)
+    -- draw station name at top
+  print(station, 101, 0, 7)
 
   -- draw grid lines
-  line(64, 15, 64, 113, 5) -- vertical center
-  line(15, 64, 113, 64, 5) -- horizontal center
+  line(0, 32, 0, 96, 1) -- vertical
+  line(32, 0, 32, 96, 1)
+  line(64, 0, 64, 96, 1)
+  line(96, 0, 96, 96, 1)
+  line(32, 0, 96, 0, 1) -- horizontal
+  line(0, 32, 96, 32, 1)
+  line(0, 64, 96, 64, 1)
+  line(0, 96, 96, 96, 1)
 
   -- draw port at (0,0)
   local port_x, port_y = world_to_screen(0, 0)
-  rectfill(port_x-2, port_y-2, port_x+2, port_y+2, 10)
-  print("p", port_x-1, port_y-1, 0)
+  spr(17, port_x-4, port_y-4) -- subtract 4 to center
+
 
   -- draw sample sites
   for site in all(sample_sites) do
     if not site.collected then
       local sx, sy = world_to_screen(site.x, site.y)
-      circfill(sx, sy, 2, 12)
-      print("s", sx-1, sy-1, 7)
+      spr(19, sx-4, sy-4) -- subtract 4 to center
     end
   end
 
@@ -597,19 +582,21 @@ function draw_bridge()
 
   -- draw submarine
   local sub_x, sub_y = world_to_screen(sub.x, sub.y)
-  circfill(sub_x, sub_y, 2, 8)
-
-  -- draw heading indicator
-  local heading_angle = (sub.heading - 90) / 360
-  local hx = sub_x + cos(heading_angle) * 4
-  local hy = sub_y - sin(heading_angle) * 4  -- negate because screen Y is flipped
-  line(sub_x, sub_y, hx, hy, 7)
+  line(sub_x, sub_y, sub_x+2, sub_y+4, 7) -- right side
+  line(sub_x, sub_y, sub_x-2, sub_y+4, 7) -- left side
+  line(sub_x-2, sub_y+4, sub_x+2, sub_y+4, 7) -- stern
 
   -- cursor position info
-  print("cursor: " .. cursor.x .. "," .. cursor.y, 2, 13, 6)
+  print("cursor: " .. cursor.x .. "," .. cursor.y, 33, 1, 6)
 
-  -- draw d-pad control on left side
-  print("cursor dpad", 2, 40, 6)
+  -- draw map border
+  line(32, 0, 96, 0, 12) -- top
+  line(96, 0, 96, 96, 12) -- right
+  line(0, 96, 96, 96, 12) -- bottom
+  line(0, 32, 0, 96, 12) -- left
+  line(0, 32, 32, 0, 12) -- top left corner
+
+  -- draw d-pad control on right side
   draw_ui_buttons()
 
   if waypoint.active then
@@ -655,11 +642,6 @@ function draw_ui_buttons()
   for i, btn in pairs(ui_buttons) do
     local is_selected = (i == selected_button)
     draw_button(btn, is_selected)
-  end
-
-  -- show mode indicator
-  if input_mode == "dpad_active" then
-    print("dpad active (z to exit)", 20, 1, 11)
   end
 end
 
@@ -754,3 +736,11 @@ __gfx__
 0070070000dddd00077007700770dd0770dd0770700dd00700dddd00066006600660dd0660dd0660600dd00600cccc00077007700770cc0770cc0770700cc007
 00000000700dd00700777700007700077000770007000070600dd00600666600006600066000660006000060700cc00700777700007700077000770007000070
 00000000077777700007700000077070070770000077770006666660000660000006606006066000006666000777777000077000000770700707700000777700
+0000000066666666000066000000dd000000b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000000000700006600007660006666600000b0b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000007000006000070660666666000b300b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000999000060009aa066560ddd000b000330eeee00e00000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000885558800000666600d00b030b000eeeeeee000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000000009aa88885889aa0a006600000b000b0b0e000ee0e00000000000000000000000000000000000000000000000000000000000000000000000000000000
+000000008080885588808088506ddddd33b030b000e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000888880000888888005555550003000330000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
