@@ -416,8 +416,8 @@ function update_movement()
     local dy = target_wpt.y - sub.y
     local dist = sqrt(dx * dx + dy * dy)
 
-    -- check if arrived
-    if dist < 10 then
+    -- check if arrived (only if moving)
+    if dist < 5 and sub.speed > 0 then
       -- advance to next waypoint
       active_waypoint_index += 1
       if active_waypoint_index > #waypoints then
