@@ -459,8 +459,8 @@ function draw_button_sprite(x, y, type, state, label)
     left = {normal=8, selected=3, active=13},
     right = {normal=9, selected=4, active=14},
     action = {normal=10, selected=5, active=15},
-    left_big = {normal=8, selected=3, active=13},
-    right_big = {normal=9, selected=4, active=14}
+    left_big = {normal=21, selected=21, active=17},
+    right_big = {normal=23, selected=23, active=19}
   }
 
   -- get sprite number from map
@@ -468,12 +468,9 @@ function draw_button_sprite(x, y, type, state, label)
 
   -- check if this is a big button
   if type == "left_big" or type == "right_big" then
-    -- calculate sprite sheet pixel position
-    local sx = (sprite_num % 16) * 8
-    local sy = flr(sprite_num / 16) * 8
-
-    -- draw stretched sprite (8x8 -> 16x8)
-    sspr(sx, sy, 8, 8, x, y, 16, 8)
+    -- draw two 8x8 sprites side by side for 16x8 button
+    spr(sprite_num, x, y)
+    spr(sprite_num + 1, x + 8, y)
 
     -- draw label if provided
     if label then
