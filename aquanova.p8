@@ -28,7 +28,7 @@ resources = {
 -- === time ===
 game_time = 0
 day_length = 1800 -- frames per day (60 seconds at 30fps)
-current_day = 1
+current_day = 0
 current_hour = 0
 current_minute = 0
 
@@ -48,16 +48,22 @@ selected_button = 1 -- index of currently highlighted button
 
 -- button types and their behavior
 button_types = {
-  dpad = "dpad",
-  station = "station",
-  simple_action = "simple_action",
+  -- single sprite buttons (8x8)
   up = "up",
   down = "down",
   left = "left",
-  left_big = "left_big",
   right = "right",
-  right_big = "right_big",
   action = "action",
+
+  -- wide buttons (16x8) with optional labels
+  left_big = "left_big",
+  right_big = "right_big",
+
+  -- composite controls
+  dpad = "dpad",
+
+  -- utility (keep for now, unused)
+  simple_action = "simple_action",
   value = "value"
 }
 
@@ -195,7 +201,7 @@ function activate_button(btn)
     -- activate dpad mode
     input_mode = "dpad_active"
 
-    -- reset cursor to submarine position when activating cursor dpad
+    -- reset cursor to home when activating cursor dpad
     if btn.label == "cursor" then
       cursor.x = 47
       cursor.y = 64
@@ -205,7 +211,7 @@ function activate_button(btn)
          btn.type == "left_big" or btn.type == "right_big" then
     -- call on_press callback for sprite buttons
     if btn.on_press then btn.on_press() end
-  elseif btn.type == "station" or btn.type == "simple_action" or btn.type == "value" then
+  elseif btn.type == "simple_action" or btn.type == "value" then
     if btn.on_press then btn.on_press() end
   end
 end
@@ -213,9 +219,9 @@ end
 -- === button setup functions ===
 function setup_helm_buttons()
   add(ui_buttons, {
-    type = "station",
-    x = 26, y = 122,
-    label = "station",
+    type = "left_big",
+    x = 101, y = 12,
+    label = "HLM",
     on_press = cycle_station
   })
 
@@ -267,15 +273,15 @@ end
 
 function setup_bridge_buttons()
   add(ui_buttons, {
-    type = "station",
-    x = 26, y = 122,
-    label = "station",
+    type = "left_big",
+    x = 101, y = 12,
+    label = "BDG",
     on_press = cycle_station
   })
 
   add(ui_buttons, {
     type = "dpad",
-    x = 106, y = 106,
+    x = 108, y = 108, -- position of dpad on screen
     label = "cursor",
     sprite = 0,
     on_left = function()
@@ -306,27 +312,27 @@ end
 
 function setup_science_buttons()
   add(ui_buttons, {
-    type = "station",
-    x = 26, y = 122,
-    label = "station",
+    type = "left_big",
+    x = 101, y = 12,
+    label = "SCI",
     on_press = cycle_station
   })
 end
 
 function setup_engineering_buttons()
   add(ui_buttons, {
-    type = "station",
-    x = 26, y = 122,
-    label = "station",
+    type = "left_big",
+    x = 101, y = 12,
+    label = "ENG",
     on_press = cycle_station
   })
 end
 
 function setup_quarters_buttons()
   add(ui_buttons, {
-    type = "station",
-    x = 26, y = 122,
-    label = "station",
+    type = "left_big",
+    x = 101, y = 12,
+    label = "QTR",
     on_press = cycle_station
   })
 end
@@ -508,12 +514,12 @@ function draw_button(btn, is_selected)
          btn.type == "right" or btn.type == "action" then
     draw_button_sprite(btn.x, btn.y, btn.type, state)
   elseif btn.type == "left_big" or btn.type == "right_big" then
-    draw_button_sprite(btn.x, btn.y, btn.type, state, btn.label)
-  elseif btn.type == "station" then
-    -- draw as text button
-    local prefix = " "
-    if is_selected then prefix = ">" end
-    print(prefix .. btn.label .. ": " .. station, btn.x, btn.y, color)
+    -- determine which label to use based on state
+    local display_label = btn.label_normal or btn.label
+    if state == "selected" and btn.label_selected then
+      display_label = btn.label_selected
+    end
+    draw_button_sprite(btn.x, btn.y, btn.type, state, display_label)
   elseif btn.type == "simple_action" then
     -- draw simple action button (rect-based)
     rect(btn.x, btn.y, btn.x+20, btn.y+10, color)
@@ -531,6 +537,15 @@ function draw_dpad_sprite(x, y, state)
 end
 
 -- === helper functions ===
+function pad_zeros(num, width)
+  -- pad number with leading zeros to specified width
+  local str = "" .. num
+  while #str < width do
+    str = "0" .. str
+  end
+  return str
+end
+
 function world_to_screen(world_x, world_y)
   -- submarine is fixed at screen position (47, 64)
   -- world scrolls around submarine
@@ -562,7 +577,7 @@ function draw_corner_mask()
   -- fill triangular corner mask
   -- covers area above diagonal from (0,32) to (32,0)
   for y=0,31 do
-    line(0, y, 32-y, y, 11)
+    line(0, y, 32-y, y, 1)
   end
 end
 
@@ -622,33 +637,47 @@ function draw_dev_grid()
   line(32, 0, 32, 128, 5)
   line(64, 0, 64, 128, 5)
   line(96, 0, 96, 128, 5)
+  rect(0, 0, 127, 127, 13)
 end
 
 -- === station screens ===
 function draw_bridge()
-    -- draw station name at top
-  print(station, 101, 0, 7)
+
+  -- right side info bar
+  print(station, 101, 2, 7) -- station title
+
+  -- bottom info bar
+  print("navigation positionlog", 1, 98, 12) -- info bar title
+  print("mission time: ", 1, 104, 12) 
+  print(current_day .. " " .. pad_zeros(current_hour, 2) .. ":" .. pad_zeros(current_minute, 2), 53, 104, 6) -- mission time label
+  print("currpos: " .. flr(sub.x) .. "," .. flr(sub.y), 1, 110, 6) -- current position label
+  print("destpos: ", 1, 116, 12)
+  if waypoint.active then 
+    print(flr(waypoint.x) .. "," .. flr(waypoint.y), 37, 116, 6) -- destination position label
+    else
+    print(" - - - -", 37, 116, 6)
+  end
 
   -- draw grid lines
-  line(0, 32, 0, 96, 1) -- vertical
+  line(0, 32, 0, 96, 1) -- longitude major line
   line(32, 0, 32, 96, 1)
   line(64, 0, 64, 96, 1)
   line(96, 0, 96, 96, 1)
-  line(32, 0, 96, 0, 1) -- horizontal
+  line(32, 0, 96, 0, 1) -- latitude major line
   line(0, 32, 96, 32, 1)
   line(0, 64, 96, 64, 1)
   line(0, 96, 96, 96, 1)
 
   -- draw port at (0,0)
   local port_x, port_y = world_to_screen(0, 0)
-  spr(17, port_x-4, port_y-4) -- subtract 4 to center
+  spr(33, port_x-4, port_y-4) -- subtract 4 to center
 
 
   -- draw sample sites
   for site in all(sample_sites) do
     if not site.collected then
       local sx, sy = world_to_screen(site.x, site.y)
-      spr(19, sx-4, sy-4) -- subtract 4 to center
+      spr(35, sx-4, sy-4) -- subtract 4 to center
     end
   end
 
@@ -679,6 +708,11 @@ function draw_bridge()
   -- draw corner mask
   draw_corner_mask()
 
+  -- draw submarine status info
+  print("d" .. sub.depth, 1, 1, 7)
+  print("h" .. pad_zeros(sub.heading, 3), 1, 7, 7)
+  print("s" .. pad_zeros(sub.speed, 3), 1, 13, 7)
+
   -- draw map border
   line(32, 0, 96, 0, 12) -- top
   line(96, 0, 96, 96, 12) -- right
@@ -690,9 +724,8 @@ function draw_bridge()
   draw_ui_buttons()
 
   if waypoint.active then
-    print("navigating...", 2, 100, 11)
+    print("navigating...", 2, 90, 11)
   end
-  print("x=set waypoint", 2, 106, 6)
 end
 
 function draw_helm()
@@ -826,11 +859,19 @@ __gfx__
 0070070000dddd00077007700770dd0770dd0770700dd00700dddd00066006600660dd0660dd0660600dd00600cccc00077007700770cc0770cc0770700cc007
 00000000700dd00700777700007700077000770007000070600dd00600666600006600066000660006000060700cc00700777700007700077000770007000070
 00000000077777700007700000077070070770000077770006666660000660000006606006066000006666000777777000077000000770700707700000777700
-0000000066666666000066000000dd000000b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-000000000700006600007660006666600000b0b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000007000006000070660666666000b300b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000999000060009aa066560ddd000b000330eeee00e00000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000885558800000666600d00b030b000eeeeeee000000000000000000000000000000000000000000000000000000000000000000000000000000000
-000000009aa88885889aa0a006600000b000b0b0e000ee0e00000000000000000000000000000000000000000000000000000000000000000000000000000000
-000000008080885588808088506ddddd33b030b000e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000888880000888888005555550003000330000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000777000000777007770000000770000006660000006660066600000006600000000000000000000000000000000000000000000000000000000000
+0000000000770dddddddd077770dddddddd0770000660dddddddd066660dddddddd0660000000000000000000000000000000000000000000000000000000000
+000000000770dddddddddd0770dddddddddd07700660dddddddddd0660dddddddddd066000000000000000000000000000000000000000000000000000000000
+00000000770dddddddddddd77dddddddddddd077660dddddddddddd66dddddddddddd06600000000000000000000000000000000000000000000000000000000
+00000000770dddddddddddd77dddddddddddd077660dddddddddddd66dddddddddddd06600000000000000000000000000000000000000000000000000000000
+000000000770dddddddddd0770dddddddddd07700660dddddddddd0660dddddddddd066000000000000000000000000000000000000000000000000000000000
+0000000000770dddddddd077770dddddddd0770000660dddddddd066660dddddddd0660000000000000000000000000000000000000000000000000000000000
+00000000000777000000777007770000000770000006660000006660066600000006600000000000000000000000000000000000000000000000000000000000
+0000000000066600000000000000dd000000b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000000000666666600000000006666600000b0b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000000606060000000000666666000b300b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000000006000000000006560ddd000b000330eeee00e00000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000060060060000000066600d00b030b000eeeeeee000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000066060660000000006600000b000b0b0e000ee0e00000000000000000000000000000000000000000000000000000000000000000000000000000000
+000000000666666600000000506ddddd33b030b000e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000666000000000005555550003000330000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
