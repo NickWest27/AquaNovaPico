@@ -4,14 +4,18 @@ __lua__
 -- aqua nova pico
 -- submarine strategy game
 
+-- =====================================================================
 -- === game state ===
+-- =====================================================================
 station = "bridge"
-station_index = 1
+station_index = 3
 stations = {
+  "communications",
+  "sensors",
   "bridge",
   "helm",
-  "science",
   "engineering",
+  "science",
   "quarters"
 }
 
@@ -83,19 +87,19 @@ samples_collected = 0
 collection_range = 5  -- units within which to collect
 
 -- waypoint system
-waypoint = {
-  x = 0,
-  y = 0,
-  active = false
-}
+-- waypoint 0 = ownship present position (implicit)
+-- waypoint 1, 2, 3... = user-defined waypoints
+waypoints = {}
+active_waypoint_index = 0  -- 0 = no active route, 1+ = navigating to waypoint N
 
 -- cursor for bridge map (screen coordinates)
 cursor = {
   x = 47,  -- start at submarine position
   y = 64
 }
-
+-- =====================================================================
 -- === initialization ===
+-- =====================================================================
 function _init()
   -- resources initialized above
   setup_station_buttons()
@@ -103,20 +107,31 @@ end
 
 function setup_station_buttons()
   -- setup buttons based on current station
+  local prev_selected = selected_button
   ui_buttons = {}
-  selected_button = 1
   input_mode = "navigate"
 
-  if station == "helm" then
-    setup_helm_buttons()
+  if station == "communications" then
+    setup_comm_buttons()
+  elseif station == "sensors" then
+    setup_sensors_buttons()
   elseif station == "bridge" then
     setup_bridge_buttons()
-  elseif station == "science" then
-    setup_science_buttons()
+  elseif station == "helm" then
+    setup_helm_buttons()
   elseif station == "engineering" then
     setup_engineering_buttons()
+  elseif station == "science" then
+    setup_science_buttons()
   elseif station == "quarters" then
     setup_quarters_buttons()
+  end
+
+  -- validate and restore selection
+  if prev_selected < 1 or prev_selected > #ui_buttons then
+    selected_button = 1
+  else
+    selected_button = prev_selected
   end
 end
 
@@ -216,131 +231,152 @@ function activate_button(btn)
   end
 end
 
--- === button setup functions ===
-function setup_helm_buttons()
+-- === button helper functions ===
+function button(btn_type, x, y, on_press, label_normal, color_normal, label_selected, color_selected)
   add(ui_buttons, {
-    type = "left_big",
-    x = 101, y = 12,
-    label = "HLM",
-    on_press = cycle_station
+    type = btn_type,
+    x = x,
+    y = y,
+    on_press = on_press,
+    label = label_normal,
+    label_normal = label_normal,
+    label_selected = label_selected,
+    color_normal = color_normal,
+    color_selected = color_selected
   })
+end
 
+function dpad(x, y, callbacks)
   add(ui_buttons, {
     type = "dpad",
-    x = 18, y = 60,
+    x = x,
+    y = y,
+    label = callbacks.label or "",
+    on_left = callbacks.left,
+    on_right = callbacks.right,
+    on_up = callbacks.up,
+    on_down = callbacks.down,
+    on_action = callbacks.action
+  })
+end
+
+-- === button setup functions ===
+function setup_comm_buttons()
+  button("left_big", 102, 12, cycle_station_backward, "QT")
+  button("right_big", 102, 21, cycle_station_forward, "SR")
+  -- placeholder for future comm buttons
+end
+
+function setup_sensors_buttons()
+  button("left_big", 102, 12, cycle_station_backward, "CM")
+  button("right_big", 102, 21, cycle_station_forward, "BR")
+  -- placeholder for future sensor buttons
+end
+
+function setup_bridge_buttons()
+  button("left_big", 102, 12, cycle_station_backward, "SR") -- station left
+  button("right_big", 102, 21, cycle_station_forward, "HL") -- station right
+
+  dpad(108, 108, {
+    label = "cursor",
+    left = function()
+      cursor.x -= 5
+      if cursor.x < 0 then cursor.x = 0 end
+    end,
+    right = function()
+      cursor.x += 5
+      if cursor.x > 96 then cursor.x = 96 end
+    end,
+    up = function()
+      cursor.y -= 5
+      if cursor.y < 0 then cursor.y = 0 end
+    end,
+    down = function()
+      cursor.y += 5
+      if cursor.y > 96 then cursor.y = 96 end
+    end,
+    action = function()
+      -- convert screen cursor to world waypoint and add to route
+      local world_x, world_y = screen_to_world(cursor.x, cursor.y)
+      add(waypoints, {x=world_x, y=world_y})
+
+      -- activate navigation if this is first waypoint
+      if active_waypoint_index == 0 then
+        active_waypoint_index = 1
+      end
+    end
+  })
+end
+
+function setup_helm_buttons()
+  button("left_big", 102, 12, cycle_station_backward, "BR")
+  button("right_big", 102, 21, cycle_station_forward, "EN")
+
+  dpad(18, 60, {
     label = "heading",
-    sprite = 0, -- sprite index for dpad
-    on_left = function()
+    left = function()
       sub.heading -= 15
       if sub.heading < 0 then sub.heading += 360 end
     end,
-    on_right = function()
+    right = function()
       sub.heading += 15
       if sub.heading >= 360 then sub.heading -= 360 end
     end
   })
 
-  add(ui_buttons, {
-    type = "dpad",
-    x = 56, y = 60,
+  dpad(56, 60, {
     label = "speed",
-    sprite = 0,
-    on_up = function()
+    up = function()
       sub.speed += 10
       if sub.speed > 160 then sub.speed = 160 end
     end,
-    on_down = function()
+    down = function()
       sub.speed -= 10
       if sub.speed < 0 then sub.speed = 0 end
     end
   })
 
-  add(ui_buttons, {
-    type = "dpad",
-    x = 94, y = 60,
+  dpad(94, 60, {
     label = "depth",
-    sprite = 0,
-    on_up = function()
+    up = function()
       sub.depth -= 50
       if sub.depth < 0 then sub.depth = 0 end
     end,
-    on_down = function()
+    down = function()
       sub.depth += 50
       if sub.depth > 1200 then sub.depth = 1200 end
     end
   })
 end
 
-function setup_bridge_buttons()
-  add(ui_buttons, {
-    type = "left_big",
-    x = 101, y = 12,
-    label = "BDG",
-    on_press = cycle_station
-  })
-
-  add(ui_buttons, {
-    type = "dpad",
-    x = 108, y = 108, -- position of dpad on screen
-    label = "cursor",
-    sprite = 0,
-    on_left = function()
-      cursor.x -= 5
-      if cursor.x < 0 then cursor.x = 0 end
-    end,
-    on_right = function()
-      cursor.x += 5
-      if cursor.x > 96 then cursor.x = 96 end
-    end,
-    on_up = function()
-      cursor.y -= 5
-      if cursor.y < 0 then cursor.y = 0 end
-    end,
-    on_down = function()
-      cursor.y += 5
-      if cursor.y > 96 then cursor.y = 96 end
-    end,
-    on_action = function()
-      -- convert screen cursor to world waypoint
-      local world_x, world_y = screen_to_world(cursor.x, cursor.y)
-      waypoint.x = world_x
-      waypoint.y = world_y
-      waypoint.active = true
-    end
-  })
+function setup_engineering_buttons()
+  button("left_big", 102, 12, cycle_station_backward, "HL")
+  button("right_big", 102, 21, cycle_station_forward, "SC")
 end
 
 function setup_science_buttons()
-  add(ui_buttons, {
-    type = "left_big",
-    x = 101, y = 12,
-    label = "SCI",
-    on_press = cycle_station
-  })
-end
-
-function setup_engineering_buttons()
-  add(ui_buttons, {
-    type = "left_big",
-    x = 101, y = 12,
-    label = "ENG",
-    on_press = cycle_station
-  })
+  button("left_big", 102, 12, cycle_station_backward, "EN")
+  button("right_big", 102, 21, cycle_station_forward, "QT")
 end
 
 function setup_quarters_buttons()
-  add(ui_buttons, {
-    type = "left_big",
-    x = 101, y = 12,
-    label = "QTR",
-    on_press = cycle_station
-  })
+  button("left_big", 102, 12, cycle_station_backward, "SC")
+  button("right_big", 102, 21, cycle_station_forward, "CM")
 end
 
-function cycle_station()
+function cycle_station_forward()
   station_index += 1
   if station_index > #stations then
     station_index = 1
+  end
+  station = stations[station_index]
+  setup_station_buttons()
+end
+
+function cycle_station_backward()
+  station_index -= 1
+  if station_index < 1 then
+    station_index = #stations
   end
   station = stations[station_index]
   setup_station_buttons()
@@ -374,21 +410,27 @@ end
 
 function update_movement()
   -- auto-navigate to waypoint if active
-  if waypoint.active then
-    local dx = waypoint.x - sub.x
-    local dy = waypoint.y - sub.y
+  if active_waypoint_index > 0 and active_waypoint_index <= #waypoints then
+    local target_wpt = waypoints[active_waypoint_index]
+    local dx = target_wpt.x - sub.x
+    local dy = target_wpt.y - sub.y
     local dist = sqrt(dx * dx + dy * dy)
 
     -- check if arrived
     if dist < 10 then
-      waypoint.active = false
-      sub.speed = 0  -- stop when arriving at waypoint
+      -- advance to next waypoint
+      active_waypoint_index += 1
+      if active_waypoint_index > #waypoints then
+        -- reached final waypoint, stop
+        active_waypoint_index = 0
+        sub.speed = 0
+      end
     else
       -- calculate desired heading to waypoint
       -- movement: angle = (heading-90)/360, dx=cos(angle), dy=sin(angle)
-      -- reverse: heading = atan2(dy,dx)*360 + 90
-      -- but atan2 seems inverted, try subtracting instead
-      local desired_angle = atan2(dy, dx)
+      -- reverse: heading = atan2(-dy,dx)*360 + 90
+      -- negate dy because world Y+ = south
+      local desired_angle = atan2(-dy, dx)
       local desired_heading = desired_angle * 360 - 90
       if desired_heading >= 360 then desired_heading -= 360 end
       if desired_heading < 0 then desired_heading += 360 end
@@ -426,7 +468,7 @@ function update_movement()
   local speed_scale = sub.speed / 30
 
   local dx = cos(angle) * speed_scale
-  local dy = sin(angle) * speed_scale  -- positive because world Y+ = north (lat increases upward)
+  local dy = sin(angle) * speed_scale  -- positive sin; world Y+ = north
 
   -- update submarine position
   sub.x += dx
@@ -570,6 +612,40 @@ function screen_to_world(screen_x, screen_y)
   return world_x, world_y
 end
 
+function calculate_bearing(x1, y1, x2, y2)
+  -- calculate bearing from point 1 to point 2
+  local dx = x2 - x1
+  local dy = y2 - y1
+  local angle = atan2(-dy, dx)
+  local bearing = angle * 360 + 180  -- add 180 to correct the offset
+
+  -- normalize to 0-360
+  while bearing < 0 do bearing += 360 end
+  while bearing >= 360 do bearing -= 360 end
+
+  return bearing
+end
+
+function draw_waypoint_info()
+  -- display first 3 waypoints with bearing and distance on right side
+  local y = 33
+  local prev_x, prev_y = sub.x, sub.y
+
+  for i=1,min(3, #waypoints) do
+    local wpt = waypoints[i]
+    local dx = wpt.x - prev_x
+    local dy = wpt.y - prev_y
+    local dist = flr(sqrt(dx * dx + dy * dy))
+    local brg = flr(calculate_bearing(prev_x, prev_y, wpt.x, wpt.y))
+
+    print("wpt " .. i, 102, y, 12)
+    print(pad_zeros(brg, 3) .. "/" .. dist, 102, y+7, 7)
+
+    prev_x, prev_y = wpt.x, wpt.y
+    y += 14
+  end
+end
+
 function draw_corner_mask()
   -- fill triangular corner mask
   -- covers area above diagonal from (0,32) to (32,0)
@@ -578,10 +654,32 @@ function draw_corner_mask()
   end
 end
 
+function draw_dashed_line(x1, y1, x2, y2, color)
+  -- draw a dashed line from (x1,y1) to (x2,y2)
+  local dx = x2 - x1
+  local dy = y2 - y1
+  local dist = sqrt(dx * dx + dy * dy)
+  local steps = dist / 2  -- dash every 2 pixels
+
+  for i=0,steps do
+    if i % 2 == 0 then  -- draw every other segment
+      local t1 = i / steps
+      local t2 = min((i + 1) / steps, 1)
+      local sx1 = x1 + dx * t1
+      local sy1 = y1 + dy * t1
+      local sx2 = x1 + dx * t2
+      local sy2 = y1 + dy * t2
+      line(sx1, sy1, sx2, sy2, color)
+    end
+  end
+end
+
 function draw_rotated_sub(x, y, heading)
   -- draw submarine triangle pointing in direction of heading
   -- heading: 0=north, 90=east, 180=south, 270=west
+  -- pico-8 screen: Y increases downward, so north is UP (negative Y)
   -- convert heading to pico-8 angle (0.0-1.0)
+  -- subtract 90 to convert from north=0 to east=0, then flip Y by negating sin
   local angle = (heading - 90) / 360
 
   -- define triangle points relative to center
@@ -591,36 +689,43 @@ function draw_rotated_sub(x, y, heading)
   local base_width = 2
 
   -- calculate nose point (forward)
+  -- negate sin to flip Y axis so north=up on screen
   local nose_x = x + cos(angle) * nose_dist
-  local nose_y = y + sin(angle) * nose_dist
+  local nose_y = y - sin(angle) * nose_dist
 
   -- calculate base points (stern, perpendicular to heading)
   local perp_angle = angle + 0.25  -- perpendicular angle
-  local base1_x = x - cos(angle) * base_dist + cos(perp_angle) * base_width
-  local base1_y = y - sin(angle) * base_dist + sin(perp_angle) * base_width
-  local base2_x = x - cos(angle) * base_dist - cos(perp_angle) * base_width
-  local base2_y = y - sin(angle) * base_dist - sin(perp_angle) * base_width
+  local left_x = x - cos(angle) * base_dist + cos(perp_angle) * base_width
+  local left_y = y - (- sin(angle) * base_dist + sin(perp_angle) * base_width)
+  local right_x = x - cos(angle) * base_dist - cos(perp_angle) * base_width
+  local right_y = y - (- sin(angle) * base_dist - sin(perp_angle) * base_width)
 
-  -- draw triangle
-  line(nose_x, nose_y, base1_x, base1_y, 7)
-  line(nose_x, nose_y, base2_x, base2_y, 7)
-  line(base1_x, base1_y, base2_x, base2_y, 8)
+  -- draw triangle: left side, right side, base
+  line(nose_x, nose_y, left_x, left_y, 11)   -- left side (cyan)
+  line(nose_x, nose_y, right_x, right_y, 10) -- right side (yellow)
+  line(left_x, left_y, right_x, right_y, 8)  -- base (red)
 end
 
+-- =====================================================================
 -- === draw loop (30fps) ===
+-- =====================================================================
 function _draw()
   cls()
   draw_dev_grid()
 
   -- draw current station
-  if station == "bridge" then
+  if station == "communications" then
+    draw_communications()
+  elseif station == "sensors" then
+    draw_sensors()
+  elseif station == "bridge" then
     draw_bridge()
   elseif station == "helm" then
     draw_helm()
-  elseif station == "science" then
-    draw_science()
   elseif station == "engineering" then
     draw_engineering()
+  elseif station == "science" then
+    draw_science()
   elseif station == "quarters" then
     draw_quarters()
   end
@@ -638,10 +743,27 @@ function draw_dev_grid()
 end
 
 -- === station screens ===
+function draw_communications()
+  -- placeholder for communications station
+  print(station, 101, 2, 7)
+  print("communications", 32, 48, 7)
+  print("placeholder", 40, 56, 6)
+  draw_ui_buttons()
+end
+
+function draw_sensors()
+  -- placeholder for sensors station
+  print(station, 101, 2, 7)
+  print("sensors", 40, 48, 7)
+  print("placeholder", 40, 56, 6)
+  draw_ui_buttons()
+end
+
 function draw_bridge()
 
   -- right side info bar
   print(station, 101, 2, 7) -- station title
+  draw_waypoint_info()
 
   -- bottom info bar
   print("navigation positionlog", 1, 98, 12) -- info bar title
@@ -649,9 +771,10 @@ function draw_bridge()
   print(current_day .. " " .. pad_zeros(current_hour, 2) .. ":" .. pad_zeros(current_minute, 2), 53, 104, 6) -- mission time label
   print("currpos: " .. flr(sub.x) .. "," .. flr(sub.y), 1, 110, 6) -- current position label
   print("destpos: ", 1, 116, 12)
-  if waypoint.active then 
-    print(flr(waypoint.x) .. "," .. flr(waypoint.y), 37, 116, 6) -- destination position label
-    else
+  if active_waypoint_index > 0 and active_waypoint_index <= #waypoints then
+    local dest = waypoints[active_waypoint_index]
+    print(flr(dest.x) .. "," .. flr(dest.y), 37, 116, 6) -- destination position label
+  else
     print(" - - - -", 37, 116, 6)
   end
 
@@ -665,8 +788,8 @@ function draw_bridge()
   line(0, 64, 96, 64, 1)
   line(0, 96, 96, 96, 1)
 
-  -- draw port at (0,0)
-  local port_x, port_y = world_to_screen(0, 0)
+  -- draw port at (100,0) - moved right to see ownship better
+  local port_x, port_y = world_to_screen(100, 0)
   spr(33, port_x-4, port_y-4) -- subtract 4 to center
 
 
@@ -678,29 +801,48 @@ function draw_bridge()
     end
   end
 
-  -- draw waypoint if active
-  if waypoint.active then
-    local wx, wy = world_to_screen(waypoint.x, waypoint.y)
-    circfill(wx, wy, 3, 11)
-    print("w", wx-1, wy-1, 0)
+  -- draw waypoint route lines and markers
+  if #waypoints > 0 then
+    -- draw dashed line from ownship to first waypoint
+    local wx1, wy1 = world_to_screen(waypoints[1].x, waypoints[1].y)
+    draw_dashed_line(47, 64, wx1, wy1, 10)  -- yellow dashed line
+
+    -- draw lines between waypoints
+    for i=1,#waypoints-1 do
+      local wx1, wy1 = world_to_screen(waypoints[i].x, waypoints[i].y)
+      local wx2, wy2 = world_to_screen(waypoints[i+1].x, waypoints[i+1].y)
+      draw_dashed_line(wx1, wy1, wx2, wy2, 9)
+    end
+
+    -- draw waypoint markers
+    for i=1,#waypoints do
+      local wx, wy = world_to_screen(waypoints[i].x, waypoints[i].y)
+      -- highlight active waypoint
+      local color = (i == active_waypoint_index) and 11 or 10
+      circ(wx, wy, 2, color)
+      print(i, wx-1, wy-2, color)
+    end
   end
 
   -- draw cursor (only when cursor dpad is active)
-  if input_mode == "dpad_active" and selected_button == 2 then
-    local cx, cy = cursor.x, cursor.y
-    rect(cx-3, cy-3, cx+3, cy+3, 7)
-    line(cx-5, cy, cx-3, cy, 7) -- left
-    line(cx+3, cy, cx+5, cy, 7) -- right
-    line(cx, cy-5, cx, cy-3, 7) -- up
-    line(cx, cy+3, cx, cy+5, 7) -- down
+  if input_mode == "dpad_active" then
+    local btn = ui_buttons[selected_button]
+    if btn and btn.label == "cursor" then
+      local cx, cy = cursor.x, cursor.y
+      rect(cx-3, cy-3, cx+3, cy+3, 7)
+      line(cx-5, cy, cx-3, cy, 7) -- left
+      line(cx+3, cy, cx+5, cy, 7) -- right
+      line(cx, cy-5, cx, cy-3, 7) -- up
+      line(cx, cy+3, cx, cy+5, 7) -- down
+
+      -- cursor position info (show world coordinates)
+      local cursor_world_x, cursor_world_y = screen_to_world(cursor.x, cursor.y)
+      print(flr(cursor_world_x) .. ", " .. flr(cursor_world_y), 33, 1, 6)
+    end
   end
 
   -- draw submarine (fixed at screen position)
   draw_rotated_sub(47, 64, sub.heading)
-
-  -- cursor position info (show world coordinates)
-  local cursor_world_x, cursor_world_y = screen_to_world(cursor.x, cursor.y)
-  print("cursor: " .. flr(cursor_world_x) .. "," .. flr(cursor_world_y), 33, 1, 6)
 
   -- draw corner mask
   draw_corner_mask()
@@ -720,8 +862,8 @@ function draw_bridge()
   -- draw d-pad control on right side
   draw_ui_buttons()
 
-  if waypoint.active then
-    print("navigating...", 2, 90, 11)
+  if active_waypoint_index > 0 then
+    print("navigating...", 33, 1, 11)
   end
 end
 
@@ -856,14 +998,14 @@ __gfx__
 0070070000dddd00077007700770dd0770dd0770700dd00700dddd00066006600660dd0660dd0660600dd00600cccc00077007700770cc0770cc0770700cc007
 00000000700dd00700777700007700077000770007000070600dd00600666600006600066000660006000060700cc00700777700007700077000770007000070
 00000000077777700007700000077070070770000077770006666660000660000006606006066000006666000777777000077000000770700707700000777700
-00000000000777000000777007770000000770000006660000006660066600000006600000000000000000000000000000000000000000000000000000000000
-0000000000770dddddddd077770dddddddd0770000660dddddddd066660dddddddd0660000000000000000000000000000000000000000000000000000000000
-000000000770dddddddddd0770dddddddddd07700660dddddddddd0660dddddddddd066000000000000000000000000000000000000000000000000000000000
-00000000770dddddddddddd77dddddddddddd077660dddddddddddd66dddddddddddd06600000000000000000000000000000000000000000000000000000000
-00000000770dddddddddddd77dddddddddddd077660dddddddddddd66dddddddddddd06600000000000000000000000000000000000000000000000000000000
-000000000770dddddddddd0770dddddddddd07700660dddddddddd0660dddddddddd066000000000000000000000000000000000000000000000000000000000
-0000000000770dddddddd077770dddddddd0770000660dddddddd066660dddddddd0660000000000000000000000000000000000000000000000000000000000
-00000000000777000000777007770000000770000006660000006660066600000006600000000000000000000000000000000000000000000000000000000000
+00000000000777000007770000777000000770000006660000066600006660000006600000000000000000000000000000000000000000000000000000000000
+0000000000770dddddd0077007700dddddd0770000660dddddd0066006600dddddd0660000000000000000000000000000000000000000000000000000000000
+000000000770dddddddd00777700dddddddd07700660dddddddd00666600dddddddd066000000000000000000000000000000000000000000000000000000000
+00000000770dddddddddd077770dddddddddd077660dddddddddd066660dddddddddd06600000000000000000000000000000000000000000000000000000000
+00000000770dddddddddd077770dddddddddd077660dddddddddd066660dddddddddd06600000000000000000000000000000000000000000000000000000000
+000000000770dddddddd00777700dddddddd07700660dddddddd00666600dddddddd066000000000000000000000000000000000000000000000000000000000
+0000000000770dddddd0077007700dddddd0770000660dddddd0066006600dddddd0660000000000000000000000000000000000000000000000000000000000
+00000000000777000007770000777000000770000006660000066600006660000006600000000000000000000000000000000000000000000000000000000000
 0000000000066600000000000000dd000000b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000000000666666600000000006666600000b0b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 0000000000606060000000000666666000b300b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
