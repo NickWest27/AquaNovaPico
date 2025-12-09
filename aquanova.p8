@@ -427,13 +427,9 @@ function update_movement()
       end
     else
       -- calculate desired heading to waypoint
-      -- movement: angle = (heading-90)/360, dx=cos(angle), dy=sin(angle)
-      -- reverse: heading = atan2(-dy,dx)*360 + 90
-      -- negate dy because world Y+ = south
-      local desired_angle = atan2(-dy, dx)
-      local desired_heading = desired_angle * 360 - 90
-      if desired_heading >= 360 then desired_heading -= 360 end
-      if desired_heading < 0 then desired_heading += 360 end
+      -- use same bearing calculation as display
+      -- negate dy because world Y+ = south, add 180 to correct offset
+      local desired_heading = calculate_bearing(sub.x, sub.y, target_wpt.x, target_wpt.y)
 
       -- gradually adjust heading toward waypoint
       local heading_diff = desired_heading - sub.heading
@@ -468,7 +464,7 @@ function update_movement()
   local speed_scale = sub.speed / 30
 
   local dx = cos(angle) * speed_scale
-  local dy = sin(angle) * speed_scale  -- positive sin; world Y+ = north
+  local dy = sin(angle) * speed_scale  -- positive sin; world Y+ = south
 
   -- update submarine position
   sub.x += dx
@@ -614,10 +610,11 @@ end
 
 function calculate_bearing(x1, y1, x2, y2)
   -- calculate bearing from point 1 to point 2
+  -- returns 0=north, 90=east, 180=south, 270=west
   local dx = x2 - x1
   local dy = y2 - y1
-  local angle = atan2(-dy, dx)
-  local bearing = angle * 360 + 180  -- add 180 to correct the offset
+  local angle = atan2(-dy, dx)  -- negate dy because world Y+ = south
+  local bearing = angle * 360 + 180  -- atan2 returns angle from east, convert to bearing from north
 
   -- normalize to 0-360
   while bearing < 0 do bearing += 360 end
