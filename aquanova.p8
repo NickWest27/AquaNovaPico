@@ -38,8 +38,8 @@ current_minute = 0
 
 -- === submarine ===
 sub = {
-  x = 0,
-  y = 0,
+  lon = 0, -- longitude in minutes (-10800 to +10800)
+  lat = 0, -- latitude in minutes (-5400 to +5400)
   heading = 0, -- degrees 1-360 degrees True North
   speed = 0, -- knots 0-160
   depth = 0 -- meters 0-1200
@@ -72,25 +72,26 @@ button_types = {
 }
 
 -- === map and locations ===
--- scale: 1 world unit = 1 minute, 60 units = 1 degree
-world_size = 21600 -- world is full globe: 360° × 60 minutes
+-- scale: 1 world unit = 1 decimal degree
+world_size = 360.0 -- world is full globe: 360 decimal degrees
 map_size = 96 -- map display is 96×96 pixels
 
 -- zoom system: zoom_level index selects from zoom_levels table
-zoom_level = 3 -- current zoom level (1=far, 5=close)
-zoom_levels = {0.25, 0.5, 1.0, 2.0, 4.0} -- pixels per minute at each level
+-- pixels per degree: higher zoom = closer view
+zoom_level = 7 -- default zoom level (1=widest, 9=closest)
+zoom_levels = {0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0} -- pixels per degree
 zoom = zoom_levels[zoom_level] -- actual zoom multiplier
 
 -- world coordinates (full globe):
--- x: longitude -10800 to +10800 (-180° to +180°, wraps at boundaries)
--- y: latitude -5400 to +5400 (-90° to +90°, clamps at poles)
--- zoom effects: level 1 (0.25x) shows 384', level 3 (1.0x) shows 96', level 5 (4.0x) shows 24'
+-- lon: longitude -180.0 to +180.0 (wraps at boundaries)
+-- lat: latitude -90.0 to +90.0 (clamps at poles)
+-- zoom effects: level 1 (0.25x) shows 384°, level 7 (16.0x) shows 6°, level 9 (64.0x) shows 1.5°
 
--- sample sites
+-- sample sites (decimal degrees)
 sample_sites = {
-  {x=500, y=300, collected=false},
-  {x=-400, y=200, collected=false},
-  {x=300, y=-500, collected=false}
+  {lon=8.33, lat=5.0, collected=false},     -- ~8°20'E, 5°N
+  {lon=-6.67, lat=3.33, collected=false},   -- ~6°40'W, 3°20'N
+  {lon=5.0, lat=-8.33, collected=false}     -- 5°E, ~8°20'S
 }
 
 -- sample collection
@@ -102,6 +103,7 @@ collection_range = 5  -- units within which to collect
 -- waypoint 1, 2, 3... = user-defined waypoints
 waypoints = {}
 active_waypoint_index = 0  -- 0 = no active route, 1+ = navigating to waypoint N
+waypoint_display_info = {}  -- pre-calculated bearing/distance for display
 
 -- cursor for bridge map (screen coordinates)
 cursor = {
@@ -156,6 +158,7 @@ function _update()
   update_time()
   update_movement()
   update_sample_collection()
+  update_waypoint_info()
 end
 
 function handle_input()
@@ -293,42 +296,27 @@ function setup_bridge_buttons()
   button("right_big", 102, 21, cycle_station_forward, "HL") -- station right
 
   -- zoom controls
-  button("up", 102, 80, zoom_in, "-")
-  button("down", 102, 89, zoom_out, "+")
+  button("up", 102, 87, zoom_in, "-")
+  button("down", 110, 87, zoom_out, "+")
 
   dpad(108, 108, {
     label = "cursor",
     left = function()
-      -- move cursor scaled by zoom level
-      -- at zoom=1.0: move 1 minute per step
-      -- at zoom=0.25: move 4 minutes per step (appears same speed on screen)
-      local world_x, world_y = screen_to_world(cursor.x, cursor.y)
-      world_x -= 1 / zoom  -- scale movement by zoom factor
-      cursor.x, cursor.y = world_to_screen(world_x, world_y)
-      if cursor.x < 0 then cursor.x = 0 end
+      move_cursor(-0.2, 0)  -- move 0.2 degrees west
     end,
     right = function()
-      local world_x, world_y = screen_to_world(cursor.x, cursor.y)
-      world_x += 1 / zoom  -- scale movement by zoom factor
-      cursor.x, cursor.y = world_to_screen(world_x, world_y)
-      if cursor.x > 96 then cursor.x = 96 end
+      move_cursor(0.2, 0)  -- move 0.2 degrees east
     end,
     up = function()
-      local world_x, world_y = screen_to_world(cursor.x, cursor.y)
-      world_y += 1 / zoom  -- scale movement by zoom factor
-      cursor.x, cursor.y = world_to_screen(world_x, world_y)
-      if cursor.y < 0 then cursor.y = 0 end
+      move_cursor(0, 0.2)  -- move 0.2 degrees north
     end,
     down = function()
-      local world_x, world_y = screen_to_world(cursor.x, cursor.y)
-      world_y -= 1 / zoom  -- scale movement by zoom factor
-      cursor.x, cursor.y = world_to_screen(world_x, world_y)
-      if cursor.y > 96 then cursor.y = 96 end
+      move_cursor(0, -0.2)  -- move 0.2 degrees south
     end,
     action = function()
       -- convert screen cursor to world waypoint and add to route
-      local world_x, world_y = screen_to_world(cursor.x, cursor.y)
-      add(waypoints, {x=world_x, y=world_y})
+      local world_lon, world_lat = screen_to_world(cursor.x, cursor.y)
+      add(waypoints, {lon=world_lon, lat=world_lat})
 
       -- activate navigation if this is first waypoint
       if active_waypoint_index == 0 then
@@ -340,7 +328,7 @@ end
 
 function zoom_in()
   -- increase zoom level (closer view)
-  if zoom_level < 5 then
+  if zoom_level < 9 then
     zoom_level += 1
     zoom = zoom_levels[zoom_level]
   end
@@ -352,6 +340,17 @@ function zoom_out()
     zoom_level -= 1
     zoom = zoom_levels[zoom_level]
   end
+end
+
+function move_cursor(dx_degrees, dy_degrees)
+  -- move cursor by specified world coordinate offset
+  -- automatically handles zoom scaling and screen bounds
+  local world_lon, world_lat = screen_to_world(cursor.x, cursor.y)
+  world_lon += dx_degrees / zoom
+  world_lat += dy_degrees / zoom
+  cursor.x, cursor.y = world_to_screen(world_lon, world_lat)
+  cursor.x = mid(0, cursor.x, 96)
+  cursor.y = mid(0, cursor.y, 96)
 end
 
 function setup_helm_buttons()
@@ -458,17 +457,7 @@ function update_movement()
   -- auto-navigate to waypoint if active
   if active_waypoint_index > 0 and active_waypoint_index <= #waypoints then
     local target_wpt = waypoints[active_waypoint_index]
-    local dx = target_wpt.x - sub.x
-    local dy = target_wpt.y - sub.y
-
-    -- handle longitude wrapping (take shortest path)
-    if dx > 10800 then
-      dx -= 21600
-    elseif dx < -10800 then
-      dx += 21600
-    end
-
-    local dist = sqrt(dx * dx + dy * dy)
+    local dist = calculate_distance(sub.lon, sub.lat, target_wpt.lon, target_wpt.lat)
 
     -- check if arrived (only if moving)
     if dist < 5 and sub.speed > 0 then
@@ -483,7 +472,7 @@ function update_movement()
       -- calculate desired heading to waypoint
       -- use same bearing calculation as display
       -- negate dy because world Y+ = south, add 180 to correct offset
-      local desired_heading = calculate_bearing(sub.x, sub.y, target_wpt.x, target_wpt.y)
+      local desired_heading = calculate_bearing(sub.lon, sub.lat, target_wpt.lon, target_wpt.lat)
 
       -- gradually adjust heading toward waypoint
       local heading_diff = desired_heading - sub.heading
@@ -514,36 +503,28 @@ function update_movement()
   local angle = (sub.heading - 90) / 360
 
   -- calculate velocity based on heading and speed
-  -- speed is in knots, scale by time (1 frame at 60 knots = 1 unit per 30 frames)
-  local speed_scale = sub.speed / 30
+  -- speed in knots, time scale: 1 real second = 1 game minute
+  -- 1 knot = 1 nautical mile/hour = 1/60 degree/hour
+  -- at 30fps: 1 knot = 1/60/60 degree/frame = 1/1800 degree/frame
+  local speed_scale = sub.speed / 1800  -- degrees per frame
 
   local dx = cos(angle) * speed_scale
   local dy = sin(angle) * speed_scale  -- positive sin; world Y+ = south
 
   -- update submarine position
-  sub.x += dx
-  sub.y += dy
+  sub.lon += dx
+  sub.lat += dy
 
   -- apply world wrapping
-  sub.x = wrap_longitude(sub.x)
-  sub.y = clamp_latitude(sub.y)
+  sub.lon = wrap_longitude(sub.lon)
+  sub.lat = clamp_latitude(sub.lat)
 end
 
 function update_sample_collection()
   -- check if near any uncollected sample sites
   for site in all(sample_sites) do
     if not site.collected then
-      local dx = site.x - sub.x
-      local dy = site.y - sub.y
-
-      -- handle longitude wrapping for distance calculation
-      if dx > 10800 then
-        dx -= 21600
-      elseif dx < -10800 then
-        dx += 21600
-      end
-
-      local dist = sqrt(dx * dx + dy * dy)
+      local dist = calculate_distance(sub.lon, sub.lat, site.lon, site.lat)
 
       if dist < collection_range then
         site.collected = true
@@ -551,6 +532,22 @@ function update_sample_collection()
         resources.money += 100  -- reward for sample
       end
     end
+  end
+end
+
+function update_waypoint_info()
+  -- pre-calculate waypoint display info (bearing/distance)
+  -- this keeps calculations out of draw loop
+  waypoint_display_info = {}
+  local prev_lon, prev_lat = sub.lon, sub.lat
+
+  for i=1,min(3, #waypoints) do
+    local wpt = waypoints[i]
+    local dist = flr(calculate_distance(prev_lon, prev_lat, wpt.lon, wpt.lat))
+    local brg = flr(calculate_bearing(prev_lon, prev_lat, wpt.lon, wpt.lat))
+
+    add(waypoint_display_info, {bearing=brg, distance=dist})
+    prev_lon, prev_lat = wpt.lon, wpt.lat
   end
 end
 
@@ -647,82 +644,86 @@ function pad_zeros(num, width)
   return str
 end
 
-function wrap_longitude(x)
+function wrap_longitude_delta(dx)
+  -- wrap longitude difference to shortest path
+  -- used for distance/bearing calculations
+  if dx > 180.0 then
+    dx -= 360.0
+  elseif dx < -180.0 then
+    dx += 360.0
+  end
+  return dx
+end
+
+function wrap_longitude(lon)
   -- wrap longitude coordinate at world boundaries
-  -- longitude wraps continuously: -10800 to +10800 (±180°)
-  while x > 10800 do
-    x -= 21600
+  -- longitude wraps continuously: -180.0 to +180.0
+  while lon > 180.0 do
+    lon -= 360.0
   end
-  while x < -10800 do
-    x += 21600
+  while lon < -180.0 do
+    lon += 360.0
   end
-  return x
+  return lon
 end
 
-function clamp_latitude(y)
+function clamp_latitude(lat)
   -- clamp latitude to world boundaries
-  -- latitude clamps at poles: -5400 to +5400 (±90°)
-  if y > 5400 then y = 5400 end
-  if y < -5400 then y = -5400 end
-  return y
+  -- latitude clamps at poles: -90.0 to +90.0
+  if lat > 90.0 then lat = 90.0 end
+  if lat < -90.0 then lat = -90.0 end
+  return lat
 end
 
-function world_to_degrees(world_x, world_y)
-  -- convert world coordinates to degrees lat/lon
-  -- world: x=-1000 to +1000, y=-1000 to +1000
-  -- output: longitude 0-360° (0°=prime meridian, 180°=antimeridian)
-  --         latitude 0-180° (0°=south pole, 90°=equator, 180°=north pole)
-
-  -- longitude: map -1000..+1000 to 0..360
-  -- -1000 = 180°W (180°), 0 = 0°, +1000 = 180°E (180°)
-  local lon_deg = (world_x + 1000) * 360 / 2000
-
-  -- latitude: map -1000..+1000 to 0..180
-  -- -1000 = 0° (90°S), 0 = 90° (equator), +1000 = 180° (90°N)
-  local lat_deg = (world_y + 1000) * 180 / 2000
-
-  return lon_deg, lat_deg
+function calculate_distance(lon1, lat1, lon2, lat2)
+  -- calculate distance with longitude wrapping
+  local dx = lon2 - lon1
+  local dy = lat2 - lat1
+  dx = wrap_longitude_delta(dx)
+  return sqrt(dx * dx + dy * dy)
 end
 
-function format_position(world_x, world_y)
-  -- format position as "DDDW DDN" or "DDDE DDS"
-  -- returns string like "045w 23n" or "120e 67s"
-  -- scale: 1 world unit = 1 minute, 60 units = 1 degree
-
-  -- longitude: -10800 to +10800 maps to 180W to 180E
-  -- convert minutes to degrees: world_x / 60
-  local lon_val = abs(world_x) / 60
-  local lon_dir = world_x >= 0 and "e" or "w"
-
-  -- latitude: -5400 to +5400 maps to 90S to 90N
-  -- convert minutes to degrees: world_y / 60
-  local lat_val = abs(world_y) / 60
-  local lat_dir = world_y >= 0 and "n" or "s"
-
-  return pad_zeros(flr(lon_val), 3) .. lon_dir .. " " .. pad_zeros(flr(lat_val), 2) .. lat_dir
+function degrees_to_minutes(degrees)
+  -- convert decimal degrees to whole degrees + minutes
+  -- example: 45.5° = 45° 30'
+  local deg = flr(abs(degrees))
+  local min = flr((abs(degrees) - deg) * 60)
+  return deg, min
 end
 
-function world_to_screen(world_x, world_y)
+function format_position(world_lon, world_lat)
+  -- format position as "DDD°MM'W DD°MM'N" format
+  -- returns string like "045°30e 23°15n"
+  -- coordinates are already in decimal degrees
+
+  -- convert decimal degrees to degrees + minutes
+  local lon_deg, lon_min = degrees_to_minutes(world_lon)
+  local lon_dir = world_lon >= 0 and "e" or "w"
+
+  local lat_deg, lat_min = degrees_to_minutes(world_lat)
+  local lat_dir = world_lat >= 0 and "n" or "s"
+
+  -- format: "045°30e 23°15n"
+  return pad_zeros(lon_deg, 3) .. "\31" .. pad_zeros(lon_min, 2) .. lon_dir .. " " ..
+         pad_zeros(lat_deg, 2) .. "\31" .. pad_zeros(lat_min, 2) .. lat_dir
+end
+
+function world_to_screen(world_lon, world_lat)
   -- submarine is fixed at screen position (47, 64)
   -- world scrolls around submarine
-  -- world: x=longitude (+ east, - west), y=latitude (+ north, - south)
+  -- world: lon=longitude (+ east, - west), lat=latitude (+ north, - south)
   -- screen: y increases downward, so flip y axis for latitude
 
   -- calculate offset from submarine in world units
-  local dx = world_x - sub.x
-  local dy = world_y - sub.y
+  local dx = world_lon - sub.lon
+  local dy = world_lat - sub.lat
 
   -- handle longitude wrapping (shortest distance around the world)
-  -- if the distance is > 10800 units, the object is closer going the other way
-  if dx > 10800 then
-    dx -= 21600
-  elseif dx < -10800 then
-    dx += 21600
-  end
+  dx = wrap_longitude_delta(dx)
 
   -- convert to screen pixels using zoom
-  -- at zoom=1.0: 1 world unit (1 minute) = 1 pixel
-  -- scale = zoom (1.0 = 1 pixel per minute)
+  -- at zoom=16.0: 1 world unit (1 degree) = 16 pixels
+  -- scale = zoom (pixels per degree)
   local screen_x = 47 + dx * zoom
   local screen_y = 64 - dy * zoom  -- negative because screen Y is inverted
 
@@ -732,24 +733,20 @@ end
 function screen_to_world(screen_x, screen_y)
   -- inverse of world_to_screen
   -- convert screen position to world coordinates using zoom
-  -- at zoom=1.0: 1 pixel = 1 world unit (1 minute)
-  local world_x = sub.x + (screen_x - 47) / zoom
-  local world_y = sub.y - (screen_y - 64) / zoom  -- negative for Y inversion
-  return world_x, world_y
+  -- at zoom=16.0: 1 pixel = 0.0625 degrees (1/16 degree)
+  local world_lon = sub.lon + (screen_x - 47) / zoom
+  local world_lat = sub.lat - (screen_y - 64) / zoom  -- negative for Y inversion
+  return world_lon, world_lat
 end
 
-function calculate_bearing(x1, y1, x2, y2)
+function calculate_bearing(lon1, lat1, lon2, lat2)
   -- calculate bearing from point 1 to point 2
   -- returns 0=north, 90=east, 180=south, 270=west
-  local dx = x2 - x1
-  local dy = y2 - y1
+  local dx = lon2 - lon1
+  local dy = lat2 - lat1
 
   -- handle longitude wrapping (take shortest path)
-  if dx > 10800 then
-    dx -= 21600
-  elseif dx < -10800 then
-    dx += 21600
-  end
+  dx = wrap_longitude_delta(dx)
 
   local angle = atan2(-dy, dx)  -- negate dy because world Y+ = south
   local bearing = angle * 360 + 180  -- atan2 returns angle from east, convert to bearing from north
@@ -763,28 +760,13 @@ end
 
 function draw_waypoint_info()
   -- display first 3 waypoints with bearing and distance on right side
+  -- data pre-calculated in update_waypoint_info()
   local y = 33
-  local prev_x, prev_y = sub.x, sub.y
 
-  for i=1,min(3, #waypoints) do
-    local wpt = waypoints[i]
-    local dx = wpt.x - prev_x
-    local dy = wpt.y - prev_y
-
-    -- handle longitude wrapping for distance calculation
-    if dx > 10800 then
-      dx -= 21600
-    elseif dx < -10800 then
-      dx += 21600
-    end
-
-    local dist = flr(sqrt(dx * dx + dy * dy))
-    local brg = flr(calculate_bearing(prev_x, prev_y, wpt.x, wpt.y))
-
+  for i=1,#waypoint_display_info do
+    local info = waypoint_display_info[i]
     print("wpt " .. i, 102, y, 12)
-    print(pad_zeros(brg, 3) .. "/" .. dist, 102, y+7, 7)
-
-    prev_x, prev_y = wpt.x, wpt.y
+    print(pad_zeros(info.bearing, 3) .. "/" .. info.distance, 102, y+7, 7)
     y += 14
   end
 end
@@ -913,23 +895,23 @@ function draw_bridge()
   print("navigation positionlog", 1, 98, 12) -- info bar title
   print("mission time: ", 1, 104, 12)
   print(current_day .. " " .. pad_zeros(current_hour, 2) .. ":" .. pad_zeros(current_minute, 2), 53, 104, 6) -- mission time label
-  print("currpos: " .. format_position(sub.x, sub.y), 1, 110, 6) -- current position label
+  print("currpos: " .. format_position(sub.lon, sub.lat), 1, 110, 6) -- current position label
   print("destpos: ", 1, 116, 12)
   if active_waypoint_index > 0 and active_waypoint_index <= #waypoints then
     local dest = waypoints[active_waypoint_index]
-    print(format_position(dest.x, dest.y), 37, 116, 6) -- destination position label
+    print(format_position(dest.lon, dest.lat), 37, 116, 6) -- destination position label
   else
     print(" - - - -", 37, 116, 6)
   end
 
   -- draw grid lines at 1-degree increments
-  -- 1 degree = 60 world units (1 world unit = 1 minute)
-  -- at zoom=1.0: grid lines are 60 pixels apart
-  local grid_spacing = 60  -- 1 degree in world units (60 minutes)
+  -- 1 degree = 1.0 world units (1 world unit = 1 decimal degree)
+  -- at zoom=16.0: grid lines are 16 pixels apart
+  local grid_spacing = 1.0  -- 1 degree in world units
 
   -- draw vertical lines (longitude)
   for i = -3, 3 do
-    local x = 47 + (i * grid_spacing - (sub.x % grid_spacing)) * zoom
+    local x = 47 + (i * grid_spacing - (sub.lon % grid_spacing)) * zoom
     if x >= 0 and x <= map_size then
       line(x, 0, x, map_size, 1)
     end
@@ -937,7 +919,7 @@ function draw_bridge()
 
   -- draw horizontal lines (latitude)
   for i = -3, 3 do
-    local y = 64 - (i * grid_spacing - (sub.y % grid_spacing)) * zoom
+    local y = 64 - (i * grid_spacing - (sub.lat % grid_spacing)) * zoom
     if y >= 0 and y <= map_size then
       line(0, y, map_size, y, 1)
     end
@@ -951,7 +933,7 @@ function draw_bridge()
   -- draw sample sites
   for site in all(sample_sites) do
     if not site.collected then
-      local sx, sy = world_to_screen(site.x, site.y)
+      local sx, sy = world_to_screen(site.lon, site.lat)
       spr(35, sx-4, sy-4) -- subtract 4 to center
     end
   end
@@ -959,19 +941,19 @@ function draw_bridge()
   -- draw waypoint route lines and markers
   if #waypoints > 0 then
     -- draw dashed line from ownship to first waypoint
-    local wx1, wy1 = world_to_screen(waypoints[1].x, waypoints[1].y)
+    local wx1, wy1 = world_to_screen(waypoints[1].lon, waypoints[1].lat)
     draw_dashed_line(47, 64, wx1, wy1, 10)  -- yellow dashed line
 
     -- draw lines between waypoints
     for i=1,#waypoints-1 do
-      local wx1, wy1 = world_to_screen(waypoints[i].x, waypoints[i].y)
-      local wx2, wy2 = world_to_screen(waypoints[i+1].x, waypoints[i+1].y)
+      local wx1, wy1 = world_to_screen(waypoints[i].lon, waypoints[i].lat)
+      local wx2, wy2 = world_to_screen(waypoints[i+1].lon, waypoints[i+1].lat)
       draw_dashed_line(wx1, wy1, wx2, wy2, 9)
     end
 
     -- draw waypoint markers
     for i=1,#waypoints do
-      local wx, wy = world_to_screen(waypoints[i].x, waypoints[i].y)
+      local wx, wy = world_to_screen(waypoints[i].lon, waypoints[i].lat)
       -- highlight active waypoint
       local color = (i == active_waypoint_index) and 11 or 10
       circ(wx, wy, 2, color)
@@ -991,8 +973,8 @@ function draw_bridge()
       line(cx, cy+3, cx, cy+5, 7) -- down
 
       -- cursor position info (show coordinates in lat/lon format)
-      local cursor_world_x, cursor_world_y = screen_to_world(cursor.x, cursor.y)
-      print(format_position(cursor_world_x, cursor_world_y), 33, 1, 6)
+      local cursor_world_lon, cursor_world_lat = screen_to_world(cursor.x, cursor.y)
+      print(format_position(cursor_world_lon, cursor_world_lat), 33, 1, 6)
     end
   end
 
@@ -1029,7 +1011,7 @@ function draw_helm()
 
   -- display position
   print("position", 10, y, 6)
-  print(format_position(sub.x, sub.y), 10, y+6, 7)
+  print(format_position(sub.lon, sub.lat), 10, y+6, 7)
   y += 20
 
   -- display current values above dpads
@@ -1119,7 +1101,7 @@ function draw_quarters()
   -- display position
   print("position", 10, y, 6)
   y += 8
-  print(format_position(sub.x, sub.y), 10, y, 7)
+  print(format_position(sub.lon, sub.lat), 10, y, 7)
   y += 15
 
   -- display resources
