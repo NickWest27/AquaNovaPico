@@ -73,14 +73,18 @@ button_types = {
 
 -- === map and locations ===
 -- scale: 1 world unit = 1 minute, 60 units = 1 degree
--- map zoom: 1 pixel = 1 minute (tactical zoom level)
 world_size = 21600 -- world is full globe: 360° × 60 minutes
 map_size = 96 -- map display is 96×96 pixels
-zoom = 1.0 -- zoom level: 1.0 = 1 pixel per minute (96 pixels shows 96 minutes = 1.6°)
+
+-- zoom system: zoom_level index selects from zoom_levels table
+zoom_level = 3 -- current zoom level (1=far, 5=close)
+zoom_levels = {0.25, 0.5, 1.0, 2.0, 4.0} -- pixels per minute at each level
+zoom = zoom_levels[zoom_level] -- actual zoom multiplier
+
 -- world coordinates (full globe):
 -- x: longitude -10800 to +10800 (-180° to +180°, wraps at boundaries)
 -- y: latitude -5400 to +5400 (-90° to +90°, clamps at poles)
--- at zoom=1.0, the 96×96 map shows 96×96 minutes (1.6° × 1.6°) centered on submarine
+-- zoom effects: level 1 (0.25x) shows 384', level 3 (1.0x) shows 96', level 5 (4.0x) shows 24'
 
 -- sample sites
 sample_sites = {
@@ -288,32 +292,36 @@ function setup_bridge_buttons()
   button("left_big", 102, 12, cycle_station_backward, "SR") -- station left
   button("right_big", 102, 21, cycle_station_forward, "HL") -- station right
 
+  -- zoom controls
+  button("up", 102, 80, zoom_in, "-")
+  button("down", 102, 89, zoom_out, "+")
+
   dpad(108, 108, {
     label = "cursor",
     left = function()
-      -- move cursor in 1-minute increments
-      -- 1 world unit = 1 minute
-      -- 60 world units = 1 degree
+      -- move cursor scaled by zoom level
+      -- at zoom=1.0: move 1 minute per step
+      -- at zoom=0.25: move 4 minutes per step (appears same speed on screen)
       local world_x, world_y = screen_to_world(cursor.x, cursor.y)
-      world_x -= 1  -- move 1 minute west
+      world_x -= 1 / zoom  -- scale movement by zoom factor
       cursor.x, cursor.y = world_to_screen(world_x, world_y)
       if cursor.x < 0 then cursor.x = 0 end
     end,
     right = function()
       local world_x, world_y = screen_to_world(cursor.x, cursor.y)
-      world_x += 1  -- move 1 minute east
+      world_x += 1 / zoom  -- scale movement by zoom factor
       cursor.x, cursor.y = world_to_screen(world_x, world_y)
       if cursor.x > 96 then cursor.x = 96 end
     end,
     up = function()
       local world_x, world_y = screen_to_world(cursor.x, cursor.y)
-      world_y += 1  -- move 1 minute north (world Y+ = north)
+      world_y += 1 / zoom  -- scale movement by zoom factor
       cursor.x, cursor.y = world_to_screen(world_x, world_y)
       if cursor.y < 0 then cursor.y = 0 end
     end,
     down = function()
       local world_x, world_y = screen_to_world(cursor.x, cursor.y)
-      world_y -= 1  -- move 1 minute south
+      world_y -= 1 / zoom  -- scale movement by zoom factor
       cursor.x, cursor.y = world_to_screen(world_x, world_y)
       if cursor.y > 96 then cursor.y = 96 end
     end,
@@ -328,6 +336,22 @@ function setup_bridge_buttons()
       end
     end
   })
+end
+
+function zoom_in()
+  -- increase zoom level (closer view)
+  if zoom_level < 5 then
+    zoom_level += 1
+    zoom = zoom_levels[zoom_level]
+  end
+end
+
+function zoom_out()
+  -- decrease zoom level (wider view)
+  if zoom_level > 1 then
+    zoom_level -= 1
+    zoom = zoom_levels[zoom_level]
+  end
 end
 
 function setup_helm_buttons()
