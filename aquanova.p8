@@ -302,16 +302,16 @@ function setup_bridge_buttons()
   dpad(108, 108, {
     label = "cursor",
     left = function()
-      move_cursor(-0.2, 0)  -- move 0.2 degrees west
+      move_cursor(-1, 0)  -- move 1 degree west
     end,
     right = function()
-      move_cursor(0.2, 0)  -- move 0.2 degrees east
+      move_cursor(1, 0)  -- move 1 degree east
     end,
     up = function()
-      move_cursor(0, 0.2)  -- move 0.2 degrees north
+      move_cursor(0, 1)  -- move 1 degree north
     end,
     down = function()
-      move_cursor(0, -0.2)  -- move 0.2 degrees south
+      move_cursor(0, -1)  -- move 1 degree south
     end,
     action = function()
       -- convert screen cursor to world waypoint and add to route
@@ -779,6 +779,23 @@ function draw_corner_mask()
   end
 end
 
+function draw_border_mask()
+  -- fill rectangles outside map boundaries to mask overflow
+  -- map area is (0,0) to (96,96) with clipped corner
+
+  -- top border (above map, right of clipped corner)
+  rectfill(32, -1, 127, -1, 1)
+
+  -- right border (right of map)
+  rectfill(97, 0, 127, 127, 1)
+
+  -- bottom border (below map)
+  rectfill(0, 97, 127, 127, 1)
+
+  -- left border (left of map)
+  rectfill(-1, 0, -1, 127, 1)
+end
+
 function draw_dashed_line(x1, y1, x2, y2, color)
   -- draw a dashed line from (x1,y1) to (x2,y2)
   local dx = x2 - x1
@@ -887,23 +904,6 @@ end
 
 function draw_bridge()
 
-  -- right side info bar
-  print(station, 101, 2, 7) -- station title
-  draw_waypoint_info()
-
-  -- bottom info bar
-  print("navigation positionlog", 1, 98, 12) -- info bar title
-  print("mission time: ", 1, 104, 12)
-  print(current_day .. " " .. pad_zeros(current_hour, 2) .. ":" .. pad_zeros(current_minute, 2), 53, 104, 6) -- mission time label
-  print("currpos: " .. format_position(sub.lon, sub.lat), 1, 110, 6) -- current position label
-  print("destpos: ", 1, 116, 12)
-  if active_waypoint_index > 0 and active_waypoint_index <= #waypoints then
-    local dest = waypoints[active_waypoint_index]
-    print(format_position(dest.lon, dest.lat), 37, 116, 6) -- destination position label
-  else
-    print(" - - - -", 37, 116, 6)
-  end
-
   -- draw grid lines at 1-degree increments
   -- 1 degree = 1.0 world units (1 world unit = 1 decimal degree)
   -- at zoom=16.0: grid lines are 16 pixels apart
@@ -912,17 +912,13 @@ function draw_bridge()
   -- draw vertical lines (longitude)
   for i = -3, 3 do
     local x = 47 + (i * grid_spacing - (sub.lon % grid_spacing)) * zoom
-    if x >= 0 and x <= map_size then
-      line(x, 0, x, map_size, 1)
-    end
+    line(x, 0, x, map_size, 1)
   end
 
   -- draw horizontal lines (latitude)
   for i = -3, 3 do
     local y = 64 - (i * grid_spacing - (sub.lat % grid_spacing)) * zoom
-    if y >= 0 and y <= map_size then
-      line(0, y, map_size, y, 1)
-    end
+    line(0, y, map_size, y, 1)
   end
 
   -- draw port at (100,0) - moved right to see ownship better
@@ -984,24 +980,45 @@ function draw_bridge()
   -- draw corner mask
   draw_corner_mask()
 
-  -- draw submarine status info
-  print("d" .. sub.depth, 1, 1, 7)
-  print("h" .. pad_zeros(sub.heading, 3), 1, 7, 7)
-  print("s" .. pad_zeros(sub.speed, 3), 1, 13, 7)
+  -- draw border mask rectangles to hide overflow
+  draw_border_mask()
 
-  -- draw map border
+  -- draw map border frame
   line(32, 0, 96, 0, 12) -- top
   line(96, 0, 96, 96, 12) -- right
   line(0, 96, 96, 96, 12) -- bottom
   line(0, 32, 0, 96, 12) -- left
   line(0, 32, 32, 0, 12) -- top left corner
 
-  -- draw d-pad control on right side
-  draw_ui_buttons()
+  -- draw submarine status info (top left, on map)
+  print("d" .. sub.depth, 1, 1, 7)
+  print("h" .. pad_zeros(sub.heading, 3), 1, 7, 7)
+  print("s" .. pad_zeros(sub.speed, 3), 1, 13, 7)
 
+  -- navigation status (top center, on map)
   if active_waypoint_index > 0 then
     print("navigating...", 33, 1, 11)
   end
+
+  -- right side info bar (outside map)
+  print(station, 101, 2, 7) -- station title
+  draw_waypoint_info()
+
+  -- bottom info bar (outside map)
+  print("navigation positionlog", 1, 98, 12) -- info bar title
+  print("mission time: ", 1, 104, 12)
+  print(current_day .. " " .. pad_zeros(current_hour, 2) .. ":" .. pad_zeros(current_minute, 2), 53, 104, 6) -- mission time label
+  print("currpos: " .. format_position(sub.lon, sub.lat), 1, 110, 6) -- current position label
+  print("destpos: ", 1, 116, 12)
+  if active_waypoint_index > 0 and active_waypoint_index <= #waypoints then
+    local dest = waypoints[active_waypoint_index]
+    print(format_position(dest.lon, dest.lat), 37, 116, 6) -- destination position label
+  else
+    print(" - - - -", 37, 116, 6)
+  end
+
+  -- draw d-pad control on right side (outside map)
+  draw_ui_buttons()
 end
 
 function draw_helm()
