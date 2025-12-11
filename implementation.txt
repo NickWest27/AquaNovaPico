@@ -194,60 +194,189 @@ See "SAMPLE COLLECTED" message
 Sample site marker disappears or changes color
 Navigate to another site, repeat
 Pico-8 Concepts: Tables of objects, proximity detection, state changes Estimated Tokens: ~100
-Phase 8: Port Docking & Resupply
-Goal: Sell samples and buy food at port What to Build:
-In _update(): detect when submarine at port (distance to 0,0 < 50)
-When at port, show "PRESS X TO DOCK" prompt
-Create port menu state:
-Menu options: "SELL SAMPLE: +$100", "BUY FOOD (10): -$50", "UNDOCK"
-Arrow keys to select option
-X to confirm selection
-Implement transactions:
-Sell sample: if supplies > 0, money += 100, supplies -= 1
-Buy food: if money >= 50, money -= 50, food += 10
-Undock: close menu, return to normal navigation
-Show updated resource values in menu
+Phase 8A: Port Skeleton (FIRST - Closes Survival Loop)
+Goal: Get basic port docking and resupply working
+DESIGN NOTES:
+- Port moved to Woods Hole: -70.666° lon, 41.516° lat (70°40'W, 41°31'N)
+- Auto-docking within 1/60 degree (1 minute = 0.01667 degrees)
+- Time continues while docked
+- Mission timer resets on undock (Phase 8D)
+
+What to Build:
+Add `docked` boolean state variable (near sub table or as global)
+Update port location from (100, 0) to Woods Hole coords
+Add `update_docking()` function:
+  Check distance to port < 0.01667 degrees
+  If close and not docked: set docked = true
+Modify `setup_helm_buttons()`:
+  When docked, show "Leave Port" button instead of normal controls
+Modify `setup_quarters_buttons()`:
+  When docked, show port menu: "Buy Food (10): $50" and "Undock"
+  When not docked, show normal quarters display
+Implement transaction logic:
+  Buy food: if money >= 50, money -= 50, food += 10
+  Undock: set docked = false
+
 How to Test:
-Navigate back to port (waypoint to 0,0)
-Arrive, see "PRESS X TO DOCK"
-Press X, see port menu appear
-Select "SELL SAMPLE", press X
-See money increase by 100, supplies decrease by 1
-Select "BUY FOOD", press X
-See money decrease by 50, food increase by 10
-Select "UNDOCK", return to map
-Can navigate away and return
-Pico-8Concepts: Menu state management, cursor selection, transaction logic, sub-states Estimated Tokens: ~150
-Phase 9: Mission Framework
-Goal: Accept and complete missions for rewards What to Build:
-Create mission structure:
-mission = {
-  active = false,
-  objective = "Collect 3 samples",
-  target_samples = 3,
-  samples_collected = 0,
-  reward_money = 500,
-  reward_rep = 1
+Navigate to Woods Hole (-70°40'W, 41°31'N)
+Watch for auto-dock when close
+Helm shows "Leave Port" button
+Quarters shows "Buy Food" option
+Buy food, see money decrease and food increase
+Undock from Quarters or Helm, sail away
+Game is now infinitely playable!
+
+Pico-8 Concepts: State management, conditional UI, proximity detection
+Estimated Tokens: ~80
+
+---
+
+Phase 8B: Mission Data Structure (SECOND - Backend Only)
+Goal: Create mission/task system without UI
+DESIGN NOTES:
+- Admiral Elena Vasquez (O.E.R.A. - Oceanic Exploration Research Alliance)
+- Multiple active missions: primary + secondary
+- Tasks can be standalone or conditional (e.g., "dive to 100m IN AO")
+- Complex task types: reach_ao, depth, speed, collect, depth_in_ao
+
+What to Build:
+Create missions table (after resources ~line 23):
+missions = {
+  {
+    id = 1,
+    from = "adm. vasquez",
+    subject = "initial survey",
+    text = "proceed to ao at 010°00'e 005°00'n\nand dive to 100m.",
+    status = "unread", -- unread, read, active, complete, failed
+    tasks = {
+      {type="reach_ao", lon1=9.5, lon2=10.5, lat1=4.5, lat2=5.5, complete=false},
+      {type="depth", value=100, complete=false}
+    },
+    reward = 200,
+    received_time = 0
+  }
 }
-Add "ACCEPT MISSION" option to port menu
-Track progress:
-When sample collected during active mission, increment mission.samples_collected
-Display progress on status screen: "MISSION: 2/3 SAMPLES"
-Check completion when docking:
-If samples_collected >= target_samples, show "MISSION COMPLETE!"
-Award reward_money and reward_rep
-Reset mission for next one
-Show mission details on Captain's Quarters station
+
+Add `update_missions()` function in _update():
+For each mission with status="read" or "active":
+  For each incomplete task:
+    Check task conditions:
+      reach_ao: sub.lon > lon1 AND < lon2 AND sub.lat > lat1 AND < lat2
+      depth: sub.depth >= value
+      speed: sub.speed >= value
+      collect: samples_collected >= count
+    If conditions met: set task.complete = true
+  If all tasks complete: mark mission complete, add reward to money
+
+Add 1-2 hardcoded test missions
+
 How to Test:
-Dock at port, accept mission "Collect 3 samples"
-See mission on status screen
-Collect 1 sample → see "1/3 SAMPLES"
-Collect 2 more samples → see "3/3 SAMPLES"
-Return to port, dock
-See "MISSION COMPLETE! +$500 +1 REP"
-Check resources: money increased, reputation increased
-Can accept another mission
-Pico-8 Concepts: Mission data structure, progress tracking, conditional rewards Estimated Tokens: ~120
+No UI yet - manually inspect mission.tasks[n].complete values
+Navigate to AO coordinates, watch task 1 complete
+Dive to depth, watch task 2 complete
+Mission status changes to "complete", money increases
+
+Pico-8 Concepts: Table structures, conditional logic, state tracking
+Estimated Tokens: ~120
+
+---
+
+Phase 8C: Communications Station UI (THIRD - Make Missions Visible)
+Goal: Display missions on communications station
+DESIGN NOTES:
+- Keep messages short (no scrolling initially)
+- Simple checkbox display for tasks
+- Mark as "read" when viewed
+
+What to Build:
+Modify `draw_communications()` (~line 887):
+  Find first unread or active mission
+  Display header: "FROM: ADM. VASQUEZ"
+  Display subject line
+  Display mission text (2-3 lines max)
+  Display task list with checkboxes:
+    For each task:
+      Symbol: complete ? "[x]" : "[ ]"
+      Description based on task type:
+        reach_ao: "reach ao at [coords]"
+        depth: "dive to [value]m"
+        speed: "make speed [value] kts"
+  When station viewed: mark mission status = "read"
+
+Add helper function `draw_mission(mission, y)`:
+  Returns task description strings from task table
+  Handles different task types
+
+How to Test:
+Navigate to Communications station
+See mission from Admiral Vasquez
+See task list with [ ] checkboxes
+Complete a task (navigate to AO)
+Return to Comm, see [x] checkbox
+Complete all tasks, see all [x]
+
+Pico-8 Concepts: Text display, conditional symbols, string formatting
+Estimated Tokens: ~100
+
+---
+
+Phase 8D: Mission Flow & Polish (FOURTH - Dynamic Progression)
+Goal: Add mission notifications and progression
+DESIGN NOTES:
+- No pause when new message arrives
+- Alert indicator on other stations
+- Mission timer separate from game time
+- Hardcoded mission sequence for now
+
+What to Build:
+Add `new_message_alert` flag (near gamestate ~line 10)
+Add `mission_time` variable (near time variables ~line 33)
+
+Mission notification system:
+  When new mission added: set new_message_alert = true
+  On all non-comm station draw functions:
+    If new_message_alert: print "INCOMING MESSAGE" (flashing color)
+  In draw_communications():
+    When viewed: set new_message_alert = false
+
+Mission timer:
+  In _update(): increment mission_time
+  In update_docking(): when undocking, reset mission_time = 0
+  Display mission_time on comm station header
+
+Mission progression:
+  When mission completes (all tasks done):
+    Show reward notification on quarters screen
+    Add next mission to queue (hardcoded for now)
+    Set new_message_alert = true
+
+How to Test:
+Start game, see "INCOMING MESSAGE" on non-comm stations
+View Comm station, alert clears
+Complete mission tasks
+Return to port, see reward notification
+Undock, mission timer resets
+New mission queues, alert appears again
+
+Pico-8 Concepts: Global flags, flashing text, message queue
+Estimated Tokens: ~80
+
+---
+
+Phase 9: Mission Expansion (LATER - After 8A-8D Work)
+Goal: Add advanced mission features
+DEFER THESE until basic loop works:
+- Secondary missions (interruptions)
+- Mission expiration/failure with reputation penalties
+- Line-by-line text animation (old computer style)
+- Vertical/horizontal scrolling for long messages
+- Multiple message inbox
+- Time-based completion messages ("well done at 05:00")
+
+These are great ideas but will derail getting playable loop working.
+Add one at a time AFTER Phase 8D is complete and tested.
+
+Estimated Tokens: ~100+ (TBD)
 Phase 10: Polish & Balance
 Goal: Make the loop fun and well-tuned What to Build:
 Balance resource consumption:

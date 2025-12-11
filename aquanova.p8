@@ -30,17 +30,20 @@ resources = {
 }
 
 -- === time ===
-game_time = 0
-day_length = 1800 -- frames per day (60 seconds at 30fps)
-current_day = 0
-current_hour = 0
-current_minute = 0
+frames = 0 -- frame counter (30fps)
+last_second = 0 -- last frame when a second elapsed
+m_time = 0 -- mission time in seconds (resets at port)
+z_time = 28800 -- zulu time in seconds (starts at 8:00 AM)
+m_day = 0 -- mission day counter (0-based)
+z_day = 1 -- zulu day counter (1-based)
+day = 86400 -- seconds per day constant
+
 
 -- === submarine ===
 sub = {
   lon = 0, -- longitude in minutes (-10800 to +10800)
   lat = 0, -- latitude in minutes (-5400 to +5400)
-  heading = 0, -- degrees 1-360 degrees True North
+  heading = 200, -- degrees 1-360 degrees True North
   speed = 0, -- knots 0-160
   depth = 0 -- meters 0-1200
 }
@@ -115,8 +118,8 @@ cursor = {
 -- === initialization ===
 -- =====================================================================
 function _init()
-  -- resources initialized above
   setup_station_buttons()
+  -- reset game state after game over (keep mission progression, reset everything else)
 end
 
 function setup_station_buttons()
@@ -297,7 +300,7 @@ function setup_bridge_buttons()
 
   -- zoom controls
   button("up", 102, 87, zoom_in, "-")
-  button("down", 110, 87, zoom_out, "+")
+  button("down", 112, 87, zoom_out, "+")
 
   dpad(108, 108, {
     label = "cursor",
@@ -428,27 +431,35 @@ function cycle_station_backward()
 end
 
 function update_time()
-  -- time progression
-  game_time += 1
+  frames += 1
 
-  -- update hours and minutes (30 frames = 1 minute)
-  local total_minutes = flr(game_time / 30)
-  current_hour = flr(total_minutes / 60) % 24
-  current_minute = total_minutes % 60
+  -- check if a full second has elapsed (every 30 frames)
+  if frames - last_second >= 30 then
+    last_second = frames
 
-  -- new day check
-  if game_time >= day_length then
-    game_time = 0
-    current_day += 1
-    current_hour = 0
-    current_minute = 0
+    -- increment time by 1 second
+    m_time += 1
+    z_time += 1
 
-    -- daily resource consumption
-    resources.food -= 1
+    -- === per-second updates (mission time) ===
+    -- add per-second resource changes here
+    -- example: resources.battery -= 1
 
-    -- game over check
-    if resources.food <= 0 then
-      resources.food = 0
+    -- check if mission day rolled over
+    if m_time >= day then
+      m_time -= day
+      m_day += 1
+
+      -- === per-day updates (mission time) ===
+      resources.food -= 1
+      if resources.food <= 0 then
+        resources.food = 0
+      end
+    end
+
+    -- check if zulu day rolled over
+    if z_time >= day * z_day then
+      z_day += 1
     end
   end
 end
@@ -488,7 +499,7 @@ function update_movement()
           sub.heading -= 5
         end
       else
-        sub.heading = desired_heading
+        sub.heading = flr(desired_heading)
       end
 
       -- wrap heading
@@ -991,9 +1002,9 @@ function draw_bridge()
   line(0, 32, 32, 0, 12) -- top left corner
 
   -- draw submarine status info (top left, on map)
-  print("d" .. sub.depth, 1, 1, 7)
-  print("h" .. pad_zeros(sub.heading, 3), 1, 7, 7)
-  print("s" .. pad_zeros(sub.speed, 3), 1, 13, 7)
+  print("d" .. flr(sub.depth), 1, 1, 7)
+  print("h" .. pad_zeros(flr(sub.heading), 3), 1, 7, 7)
+  print("s" .. pad_zeros(flr(sub.speed), 3), 1, 13, 7)
 
   -- navigation status (top center, on map)
   if active_waypoint_index > 0 then
@@ -1007,7 +1018,9 @@ function draw_bridge()
   -- bottom info bar (outside map)
   print("navigation positionlog", 1, 98, 12) -- info bar title
   print("mission time: ", 1, 104, 12)
-  print(current_day .. " " .. pad_zeros(current_hour, 2) .. ":" .. pad_zeros(current_minute, 2), 53, 104, 6) -- mission time label
+  local m_hour = flr(m_time / 3600) % 24
+  local m_min = flr(m_time / 60) % 60
+  print("d" .. m_day .. " " .. pad_zeros(m_hour, 2) .. ":" .. pad_zeros(m_min, 2), 53, 104, 6) -- mission time label
   print("currpos: " .. format_position(sub.lon, sub.lat), 1, 110, 6) -- current position label
   print("destpos: ", 1, 116, 12)
   if active_waypoint_index > 0 and active_waypoint_index <= #waypoints then
@@ -1036,13 +1049,13 @@ function draw_helm()
   local dir_idx = flr((sub.heading + 22.5) / 45) % 8 + 1
 
   print("heading", 10, y, 6)
-  print(sub.heading .. " " .. compass[dir_idx], 10, y+6, 7)
+  print(flr(sub.heading) .. " " .. compass[dir_idx], 10, y+6, 7)
 
   print("speed", 60, y, 6)
-  print(sub.speed .. " kts", 60, y+6, 7)
+  print(flr(sub.speed) .. " kts", 60, y+6, 7)
 
   print("depth", 95, y, 6)
-  print(sub.depth .. " m", 95, y+6, 7)
+  print(flr(sub.depth) .. " m", 95, y+6, 7)
 
   -- draw buttons (dpads will be drawn below labels)
   draw_ui_buttons()
@@ -1101,18 +1114,12 @@ function draw_quarters()
 
   local y = 25
 
-  -- display mission clock (day and time)
-  local hour_str = current_hour
-  if current_hour < 10 then
-    hour_str = "0" .. current_hour
-  end
-  local min_str = current_minute
-  if current_minute < 10 then
-    min_str = "0" .. current_minute
-  end
-  print("mission clock", 10, y, 6)
+  -- display zulu clock (world time)
+  local z_hour = flr(z_time / 3600) % 24
+  local z_min = flr(z_time / 60) % 60
+  print("zulu clock", 10, y, 6)
   y += 8
-  print("day: " .. current_day .. " " .. hour_str .. ":" .. min_str, 10, y, 7)
+  print("day: " .. z_day .. " " .. pad_zeros(z_hour, 2) .. ":" .. pad_zeros(z_min, 2), 10, y, 7)
   y += 15
 
   -- display position

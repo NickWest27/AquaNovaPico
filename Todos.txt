@@ -65,74 +65,132 @@ Full plan: /Users/nickwest/.claude/plans/precious-snuggling-rossum.md
 
 ---
 
-### Phase 4: Submarine Movement 🔄 NEXT
+### Phase 4: Submarine Movement ✅ COMPLETE
 **Goal**: Submarine actually moves based on helm settings
-**What to build**:
-- Convert heading/speed to velocity using cos/sin
-- Update submarine position each frame
-- Display position on status screen
-**Testing**: Set heading/speed, watch position change
+**Status**: DONE
+**What was built**:
+- Decimal degree coordinate system (-180° to +180° lon, -90° to +90° lat)
+- Full submarine physics with heading (0-360°), speed (0-160 kts), depth (0-1200m)
+- Position updates based on heading/speed with proper trigonometry
+- World wrapping at longitude boundaries, clamping at latitude poles
+- Position display on helm and quarters screens
+**Testing**: Set heading/speed, watch position change on helm/bridge
 **Tokens**: ~80
 
 ---
 
-### Phase 5: Bridge/Map Display ⏳ PENDING
+### Phase 5: Bridge/Map Display ✅ COMPLETE
 **Goal**: Tactical map showing submarine position
-**What to build**:
-- Create draw_bridge() with map area
-- Draw submarine as marker
-- Draw port at (0,0)
-- Draw sample site at (500, 300)
-- Scale world coords to screen coords
-**Testing**: See submarine move on map as helm changes
-**Tokens**: ~120
+**Status**: DONE
+**What was built**:
+- Full 96x96 map display with corner mask and border masking
+- 9-level zoom system (0.25x to 64x pixels per degree)
+- Grid lines at 1-degree increments
+- Rotated submarine sprite showing current heading
+- Port marker at (100, 0)
+- Sample site markers
+- Real-time position tracking
+- Info bars showing heading, speed, depth, time, coordinates
+**Testing**: Watch submarine move on map as helm settings change
+**Tokens**: ~250 (more complex than originally estimated)
 
 ---
 
-### Phase 6: Waypoint System ⏳ PENDING
+### Phase 6: Waypoint System ✅ COMPLETE
 **Goal**: Click to set waypoint, submarine auto-navigates
-**What to build**:
-- Add cursor to bridge map (arrow keys move)
-- Press X to place waypoint
-- Auto-calculate heading to waypoint
-- Arrival detection
-**Testing**: Place waypoint, watch sub navigate to it
-**Tokens**: ~150
+**Status**: DONE
+**What was built**:
+- Bridge map cursor with dpad control
+- Multi-waypoint route planning (supports multiple waypoints)
+- Automatic navigation to active waypoint
+- Bearing and distance calculations for up to 3 waypoints
+- Dashed route lines showing path
+- Waypoint markers with numbers
+- Auto-advance to next waypoint on arrival
+- Gradual heading adjustment (5°/frame turn rate)
+- Waypoint info display (bearing/distance for first 3 waypoints)
+**Testing**: Place multiple waypoints, watch sub navigate through them
+**Tokens**: ~200 (multi-waypoint more complex than planned)
 
 ---
 
-### Phase 7: Sample Collection ⏳ PENDING
+### Phase 7: Sample Collection ✅ COMPLETE
 **Goal**: Collect samples at waypoint locations
-**What to build**:
-- Define sample_sites table
-- Proximity detection to sites
-- Press X to collect, increment supplies
-- Mark sites as collected
-**Testing**: Navigate to site, collect sample
+**Status**: DONE
+**What was built**:
+- 3 sample sites at various coordinates
+- Automatic proximity detection (5-unit collection range)
+- Auto-collection when in range
+- Money reward (+$100 per sample)
+- Sample counter on science station
+- Collected/uncollected status display
+**Testing**: Navigate to site, watch auto-collect
 **Tokens**: ~100
 
 ---
 
-### Phase 8: Port Docking & Resupply ⏳ PENDING
-**Goal**: Sell samples and buy food at port
+### Phase 8A: Port Skeleton 🔄 NEXT PRIORITY
+**Goal**: Get basic port docking and resupply working
+**Status**: NOT STARTED - **CRITICAL FOR GAMEPLAY LOOP**
 **What to build**:
-- Detect when at port (0,0)
-- Port menu (sell sample, buy food, undock)
-- Transaction logic
-**Testing**: Dock, sell samples, buy food
-**Tokens**: ~150
+- Move port from (100, 0) to Woods Hole (-70.666°, 41.516°)
+- Add `docked` boolean state
+- Auto-dock when within 1/60 degree (1 minute) of port
+- Helm station: "Leave Port" button when docked
+- Quarters station: "Buy Food (10 units): $50" and "Undock" buttons
+- Transaction logic: money → food
+**Testing**: Navigate to Woods Hole → auto-dock → buy food → undock
+**Tokens**: ~80
+**Note**: This closes the survival loop - game becomes infinitely playable
 
 ---
 
-### Phase 9: Mission Framework ⏳ PENDING
-**Goal**: Accept and complete missions for rewards
+### Phase 8B: Mission Data Structure ⏳ PENDING
+**Goal**: Create mission/task system backend (no UI yet)
 **What to build**:
-- Mission structure (objective, reward, progress)
-- Accept mission at port
-- Track progress
-- Award rewards on completion
-**Testing**: Complete mission, get reward
+- Mission table with tasks: `{type="reach_ao", lon1, lon2, lat1, lat2, complete}`
+- Task types: reach_ao, depth, speed, collect
+- Task auto-completion logic in `_update()`
+- 1-2 hardcoded test missions
+**Testing**: Watch task completion via data (no UI yet)
 **Tokens**: ~120
+
+---
+
+### Phase 8C: Communications Station UI ⏳ PENDING
+**Goal**: Display missions on communications station
+**What to build**:
+- Show mission header: "FROM: ADM. VASQUEZ"
+- Display mission text (keep short, no scrolling)
+- Task list with checkboxes: `[ ] Reach AO` / `[X] Dive to 100m`
+- Mark mission as "read" when viewed
+**Testing**: View comm station → see mission → see task checkboxes update
+**Tokens**: ~100
+
+---
+
+### Phase 8D: Mission Flow & Alerts ⏳ PENDING
+**Goal**: Add dynamic mission progression
+**What to build**:
+- "INCOMING MESSAGE" alert on non-comm stations
+- Mission timer (separate from game_time, resets on undock)
+- Reward notification when mission completes
+- Queue next mission (hardcoded sequence)
+**Testing**: Complete mission → see reward → get new mission → see alert
+**Tokens**: ~80
+
+---
+
+### Phase 9: Mission Expansion ⏳ PENDING (LATER)
+**Goal**: Add advanced mission features
+**What to build** (AFTER 8A-8D work):
+- Secondary missions
+- Mission expiration/failure with reputation penalty
+- Text line-by-line animation
+- Message scrolling (vertical/horizontal)
+- Multiple message inbox
+**Testing**: TBD
+**Tokens**: ~100+
 
 ---
 
@@ -149,11 +207,23 @@ Full plan: /Users/nickwest/.claude/plans/precious-snuggling-rossum.md
 
 ---
 
-## TOKEN BUDGET
+## TOKEN BUDGET (ESTIMATED - needs verification in PICO-8)
 
-Phase 0: 50 tokens (COMPLETE)
-Phases 1-10: ~1060 tokens remaining
-TOTAL: ~1110 tokens (~3.5% of 32KB limit)
+Phases 0-3: ~290 tokens (COMPLETE)
+Phases 4-7: ~630 tokens estimated (COMPLETE - more complex than planned)
+Phase 8A (Port skeleton): ~80 tokens
+Phase 8B (Mission data): ~120 tokens
+Phase 8C (Comm UI): ~100 tokens
+Phase 8D (Mission flow): ~80 tokens
+Phase 9 (Future expansion): ~100+ tokens
+Phase 10 (Polish): ~100 tokens
+TOTAL ESTIMATED: ~1500 tokens
+
+⚠️ **ACTION NEEDED**: Load cart in PICO-8 and check actual token count (Ctrl+P)
+   User reports: 50% char capacity, 61% compressed capacity used
+
+💡 **CAPACITY CHECK**: With ~39% remaining and ~580 tokens needed for phases 8A-10,
+   should have comfortable margin for mission system + future features
 
 ---
 
@@ -193,8 +263,24 @@ TOTAL: ~1110 tokens (~3.5% of 32KB limit)
 ✅ Phase 1 complete - Resource display system
 ✅ Phase 2 complete - Time system & resource drain
 ✅ Phase 3 complete - Helm controls
-🔄 Next: Phase 4 - Submarine movement
-📊 Progress: 4/11 phases complete (36%)
+✅ Phase 4 complete - Submarine movement (decimal degrees, wrapping)
+✅ Phase 5 complete - Bridge/Map display (zoom, grid, sprites)
+✅ Phase 6 complete - Waypoint navigation (multi-waypoint routing)
+✅ Phase 7 complete - Sample collection (auto-collect in range)
+🔄 Next: Phase 8A - Port Skeleton **← CRITICAL - CLOSES SURVIVAL LOOP**
+📊 Progress: 7/13 phases complete (54%)
+
+⚠️ **ANTI-PERFECTIONISM STRATEGY**:
+   - Phase 8 split into 4 minimal increments (8A-8D)
+   - Each sub-phase is bare minimum to work
+   - Get ALL working before adding polish
+   - Defer advanced features (scrolling, animation, secondary missions) until AFTER basic loop works
+
+📋 **MISSION SYSTEM VISION** (from /Users/nickwest/.claude/plans/humble-stargazing-karp.md):
+   - Admiral Elena Vasquez (O.E.R.A.) sends missions via Communications
+   - Multi-task missions: reach AO → dive to depth → collect samples → return to port
+   - Port: Woods Hole Oceanographic Institute (-70°40'W, 41°31'N)
+   - Mission timer resets on undock, time continues while docked
 
 ---
 
