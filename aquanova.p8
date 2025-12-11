@@ -41,11 +41,16 @@ day = 86400 -- seconds per day constant
 
 -- === submarine ===
 sub = {
-  lon = 0, -- longitude in minutes (-10800 to +10800)
-  lat = 0, -- latitude in minutes (-5400 to +5400)
+  lon = 0, -- longitude in decimal degrees (-180 to +180)
+  lat = 0, -- latitude in decimal degrees (-90 to +90)
   heading = 200, -- degrees 1-360 degrees True North
   speed = 0, -- knots 0-160
-  depth = 0 -- meters 0-1200
+  depth = 0, -- meters 0-1200
+  docked = {
+    status = true, -- docked at port or not
+    name = "woods hole", -- name of current port
+    can_dock = false -- can only dock after leaving port (>1 minute away)
+  }
 }
 
 -- === ui button system ===
@@ -90,9 +95,25 @@ zoom = zoom_levels[zoom_level] -- actual zoom multiplier
 -- lat: latitude -90.0 to +90.0 (clamps at poles)
 -- zoom effects: level 1 (0.25x) shows 384°, level 7 (16.0x) shows 6°, level 9 (64.0x) shows 1.5°
 
+-- port locations (decimal degrees)
+ports = {
+  {name="woods hole", lon=-70.33, lat=40.67}  -- Woods Hole
+}
+
+-- vessels
+vessels = {
+  {lon=-70.0, lat=40.1, type="cargo", ident="neutral", hdg=180, spd=10, depth=0, health=100}  -- sample cargo ship
+}
+
+-- marine life
+marine_life = {
+  {lon=-70.1, lat=40.1, type="whale", ident="friendly", hdg=90, spd=5, depth=0, health=100}  -- sample whale
+}
+
+
 -- sample sites (decimal degrees)
 sample_sites = {
-  {lon=8.33, lat=5.0, collected=false},     -- ~8°20'E, 5°N
+  {lon=-69.9, lat=40.7, collected=false},     -- ~8°20'E, 5°N
   {lon=-6.67, lat=3.33, collected=false},   -- ~6°40'W, 3°20'N
   {lon=5.0, lat=-8.33, collected=false}     -- 5°E, ~8°20'S
 }
@@ -118,7 +139,8 @@ cursor = {
 -- === initialization ===
 -- =====================================================================
 function _init()
-  setup_station_buttons()
+  -- start at port (sub always starts docked at woods hole)
+  setup_port_buttons()
   -- reset game state after game over (keep mission progression, reset everything else)
 end
 
@@ -160,6 +182,7 @@ function _update()
   handle_input()
   update_time()
   update_movement()
+  update_docking()
   update_sample_collection()
   update_waypoint_info()
 end
@@ -412,6 +435,37 @@ function setup_quarters_buttons()
   button("right_big", 102, 21, cycle_station_forward, "CM")
 end
 
+function setup_port_buttons()
+  -- port buttons use simple_action type (rect-based, not sprite-based)
+  -- coordinates offset by menu position (x=10, y=10)
+  button("simple_action", 20, 70, buy_supplies, "buy supplies")  -- x+10, y+60
+  button("simple_action", 62, 70, buy_food, "buy food")  -- x+52, y+60
+  button("simple_action", 43, 98, leave_port, "leave port")  -- x+33, y+88
+end
+
+function buy_supplies()
+  local cost = 50
+  if resources.money >= cost then
+    resources.money -= cost
+    resources.supplies += 10
+  end
+end
+
+function buy_food()
+  local cost = 30
+  if resources.money >= cost then
+    resources.money -= cost
+    resources.food += 10
+  end
+end
+
+function leave_port()
+  sub.docked.status = false
+  sub.docked.can_dock = false
+  station = "bridge"
+  setup_station_buttons()
+end  
+
 function cycle_station_forward()
   station_index += 1
   if station_index > #stations then
@@ -530,6 +584,32 @@ function update_movement()
   sub.lon = wrap_longitude(sub.lon)
   sub.lat = clamp_latitude(sub.lat)
 end
+
+function update_docking()
+  -- check if near any port for docking/undocking
+  for port in all(ports) do
+    local dist = calculate_distance(sub.lon, sub.lat, port.lon, port.lat)
+
+    -- check if far enough to enable docking (>1 minute = >1/60 degree)
+    if dist > 1/60 then
+      sub.docked.can_dock = true
+    end
+
+    -- auto-dock if within 5 units, can dock, and not already docked
+    if dist < 5 and sub.docked.can_dock and not sub.docked.status then
+      sub.docked.status = true
+      sub.docked.name = port.name
+      sub.speed = 0
+      sub.depth = 0
+      setup_port_buttons()
+
+      -- reset mission time on docking
+      m_time = 0
+      m_day = 0
+    end
+  end
+end
+
 
 function update_sample_collection()
   -- check if near any uncollected sample sites
@@ -867,21 +947,26 @@ function _draw()
   cls()
   draw_dev_grid()
 
-  -- draw current station
-  if station == "communications" then
-    draw_communications()
-  elseif station == "sensors" then
-    draw_sensors()
-  elseif station == "bridge" then
-    draw_bridge()
-  elseif station == "helm" then
-    draw_helm()
-  elseif station == "engineering" then
-    draw_engineering()
-  elseif station == "science" then
-    draw_science()
-  elseif station == "quarters" then
-    draw_quarters()
+  -- draw port screen if docked, otherwise normal station
+  if sub.docked.status then
+    draw_port()
+  else
+    -- draw current station
+    if station == "communications" then
+      draw_communications()
+    elseif station == "sensors" then
+      draw_sensors()
+    elseif station == "bridge" then
+      draw_bridge()
+    elseif station == "helm" then
+      draw_helm()
+    elseif station == "engineering" then
+      draw_engineering()
+    elseif station == "science" then
+      draw_science()
+    elseif station == "quarters" then
+      draw_quarters()
+    end
   end
 end
 
@@ -894,6 +979,33 @@ function draw_dev_grid()
   line(64, 0, 64, 128, 5)
   line(96, 0, 96, 128, 5)
   rect(0, 0, 127, 127, 13)
+end
+
+function draw_port()
+  -- draw basic port background
+  rectfill(0, 0, 127, 127, 12) -- sky
+  rectfill(0, 64, 127, 95, 3) -- land
+  rectfill(0, 96, 127, 127, 1) -- water
+
+  -- draw port menu
+  local x = 10
+  local y = 10
+  rect(x, y, x+97, y+97, 12) -- draw menu border
+  rectfill(x+1, y+1, x+96, y+96, 1) -- draw menu background
+
+  -- port header
+  print("port operations", x+10, y+2, 7)
+  print("docked at ".. sub.docked.name, x+10, y+8, 11)
+
+  -- list resources
+  print("current supplies:", x+10, y+20, 6)
+  print("money: $" .. resources.money, x+10, y+28, 10)
+  print("food: " .. resources.food, x+10, y+34, 8)
+  print("supplies: " .. resources.supplies, x+10, y+40, 12)
+  print("reputation: " .. resources.reputation, x+10, y+46, 14)
+
+  -- draw ui buttons (handled by ui_buttons system)
+  draw_ui_buttons()
 end
 
 -- === station screens ===
@@ -932,8 +1044,8 @@ function draw_bridge()
     line(0, y, map_size, y, 1)
   end
 
-  -- draw port at (100,0) - moved right to see ownship better
-  local port_x, port_y = world_to_screen(100, 0)
+  -- draw port at Woods Hole Woods Hole (-70.666, 41.516)
+  local port_x, port_y = world_to_screen(-70.666, 41.516)
   spr(33, port_x-4, port_y-4) -- subtract 4 to center
 
 
@@ -1150,6 +1262,7 @@ function draw_quarters()
   -- draw buttons
   draw_ui_buttons()
 end
+
 __gfx__
 00000000000770000777777000077070070770000077770000066000066666600006606006066000006666000007700007777770000770700707700000777700
 0000000000777700770dd07700770007700077000700007000666600660dd06600660006600066000600006000777700770cc077007700077000770007000070
