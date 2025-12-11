@@ -41,8 +41,8 @@ day = 86400 -- seconds per day constant
 
 -- === submarine ===
 sub = {
-  lon = 0, -- longitude in decimal degrees (-180 to +180)
-  lat = 0, -- latitude in decimal degrees (-90 to +90)
+  lon = -70.67, -- longitude in decimal degrees (-180 to +180)
+  lat = 41.52, -- latitude in decimal degrees (-90 to +90)
   heading = 200, -- degrees 1-360 degrees True North
   speed = 0, -- knots 0-160
   depth = 0, -- meters 0-1200
@@ -52,6 +52,9 @@ sub = {
     can_dock = false -- can only dock after leaving port (>1 minute away)
   }
 }
+
+-- speed boost multiplier (1x = realistic, 10x = faster gameplay)
+speed_boost = 10
 
 -- === ui button system ===
 input_mode = "navigate" -- "navigate" or "dpad_active"
@@ -97,7 +100,7 @@ zoom = zoom_levels[zoom_level] -- actual zoom multiplier
 
 -- port locations (decimal degrees)
 ports = {
-  {name="woods hole", lon=-70.33, lat=40.67}  -- Woods Hole
+  {name="woods hole", lon=-70.67, lat=41.52}  -- Woods Hole
 }
 
 -- vessels
@@ -545,15 +548,17 @@ function update_movement()
       if heading_diff > 180 then heading_diff -= 360 end
       if heading_diff < -180 then heading_diff += 360 end
 
-      -- adjust heading (5 degrees per frame max turn rate)
-      if abs(heading_diff) > 5 then
+      -- adjust heading (5 degrees per second max turn rate)
+      -- at 30fps: 5/30 = 0.167 degrees per frame
+      local turn_rate = 5 / 30
+      if abs(heading_diff) > turn_rate then
         if heading_diff > 0 then
-          sub.heading += 5
+          sub.heading += turn_rate
         else
-          sub.heading -= 5
+          sub.heading -= turn_rate
         end
       else
-        sub.heading = flr(desired_heading)
+        sub.heading = desired_heading
       end
 
       -- wrap heading
@@ -568,10 +573,13 @@ function update_movement()
   local angle = (sub.heading - 90) / 360
 
   -- calculate velocity based on heading and speed
-  -- speed in knots, time scale: 1 real second = 1 game minute
-  -- 1 knot = 1 nautical mile/hour = 1/60 degree/hour
-  -- at 30fps: 1 knot = 1/60/60 degree/frame = 1/1800 degree/frame
-  local speed_scale = sub.speed / 1800  -- degrees per frame
+  -- speed in knots with boost multiplier
+  -- realistic: 1 knot = 1 nautical mile/hour
+  -- 1 nautical mile = 1/60 degree of latitude
+  -- 1 knot = (1/60 degree)/hour = (1/60)/3600 degrees/second
+  -- at 30fps: 1 knot = (1/60)/3600/30 degree/frame = 1/6480000 degree/frame
+  -- apply speed_boost multiplier for playable gameplay
+  local speed_scale = (sub.speed * speed_boost) / 6480000  -- degrees per frame
 
   local dx = cos(angle) * speed_scale
   local dy = sin(angle) * speed_scale  -- positive sin; world Y+ = south
@@ -590,17 +598,18 @@ function update_docking()
   for port in all(ports) do
     local dist = calculate_distance(sub.lon, sub.lat, port.lon, port.lat)
 
-    -- check if far enough to enable docking (>1 minute = >1/60 degree)
-    if dist > 1/60 then
+    -- check if far enough to enable docking (must leave docking range first)
+    if dist > 0.1 then  -- 0.1 degrees = ~6 nautical miles
       sub.docked.can_dock = true
     end
 
-    -- auto-dock if within 5 units, can dock, and not already docked
-    if dist < 5 and sub.docked.can_dock and not sub.docked.status then
+    -- auto-dock if within range, can dock, and not already docked
+    if dist < 0.05 and sub.docked.can_dock and not sub.docked.status then  -- 0.05 degrees = ~3 nautical miles
       sub.docked.status = true
       sub.docked.name = port.name
       sub.speed = 0
       sub.depth = 0
+      sub.docked.can_dock = false  -- reset can_dock flag when docking
       setup_port_buttons()
 
       -- reset mission time on docking
