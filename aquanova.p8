@@ -39,13 +39,17 @@ z_day = 1 -- zulu day counter (1-based)
 day = 86400 -- seconds per day constant
 
 
--- === submarine ===
+-- === player submarine ===
 sub = {
   lon = -70.67, -- longitude in decimal degrees (-180 to +180)
   lat = 41.52, -- latitude in decimal degrees (-90 to +90)
   heading = 200, -- degrees 1-360 degrees True North
   speed = 0, -- knots 0-160
-  depth = 0, -- meters 0-1200
+  acc = 5,
+  max_speed = 160,
+  depth = 0, -- meters 0-12000
+  dive_acc = 100, -- m/s
+  max_depth = 12000,
   docked = {
     status = true, -- docked at port or not
     name = "woods hole", -- name of current port
@@ -111,6 +115,36 @@ vessels = {
 -- marine life
 marine_life = {
   {lon=-70.1, lat=40.1, type="whale", ident="friendly", hdg=90, spd=5, depth=0, health=100}  -- sample whale
+}
+
+--list of task types
+task={
+	{type="area", prfx = {"procede to ", "patrol at ", "conduct a scan at ", "search area at "}},
+	{type="point",prfx = {"proceed to ", "take a sample at ", "rescue survivors at "}},
+	{type="target"}
+}
+
+-- locations that missions can reference
+locations = {
+  {name = "area of opperations", lon="71.80w", lat="40.00n", type="area"},
+  {name = "fishing grounds", lon="69.50w", lat="41.00n", type="area"},
+  {name = "sub sea colonie", lon="72.00w", lat="39.55n", type="point"},
+  {name = "deep sea mining colonie", lon="68.52w", lat="40.54n", type="point"},
+  {name = "random", lon=flr(rnd(10)-60), lat=flr(rnd(10)-10), type="area"}
+}
+
+-- mission system. Maybe in future I will write a briefing and have a function scan it for key words
+  -- to generate a task list. eg, if area is mentioned, the player has to get within 80nm of the next
+  -- lon/lat mentioned, if point is mentioned, the player must get within 6nm of the next lon/lat.
+  -- if speed/depth/heading is mentioned, the player must set those values accordingly.
+  -- if "then" the tasks are sequential, if "and" they can be done in any order, etc.
+  -- change lon/lat from readable format to decimal degrees for calculations.
+missions ={
+  {msg="proceed to the "..locations[1].name.." at "..locations[1].lon ..", "..locations[1].lat,
+    tasks = {{}},
+    completed = false,
+    transmitted = false
+  }
 }
 
 
@@ -581,8 +615,13 @@ function update_movement()
   -- apply speed_boost multiplier for playable gameplay
   local speed_scale = (sub.speed * speed_boost) / 6480000  -- degrees per frame
 
-  local dx = cos(angle) * speed_scale
-  local dy = sin(angle) * speed_scale  -- positive sin; world Y+ = south
+  -- IMPORTANT: Both cos and sin must be negated to match world coordinate system
+  -- World coords: +lon=east, +lat=north (standard geographic)
+  -- PICO-8 angle 0=east, but cos(0)=+1 points right on screen, which is WEST in world
+  -- PICO-8 angle 0.75=north, but -sin(0.75)=-1 points up on screen, which is NORTH in world
+  -- Therefore: negate both to convert from PICO-8 screen space to world coordinates
+  local dx = -cos(angle) * speed_scale  -- negate: PICO-8 +x (right) = world -lon (west)
+  local dy = -sin(angle) * speed_scale  -- negate: PICO-8 -y (up) = world +lat (north)
 
   -- update submarine position
   sub.lon += dx
@@ -1158,7 +1197,7 @@ end
 function draw_helm()
   print("helm controls", 32, 12, 7)
 
-  local y = 25
+  local y = 20
 
   -- display position
   print("position", 10, y, 6)
@@ -1180,11 +1219,6 @@ function draw_helm()
 
   -- draw buttons (dpads will be drawn below labels)
   draw_ui_buttons()
-
-  -- controls help
-  print("arrows: navigate/use", 8, 105, 6)
-  print("x: select/action", 8, 111, 6)
-  print("z: deactivate dpad", 8, 117, 6)
 end
 
 function draw_ui_buttons()
