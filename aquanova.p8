@@ -44,6 +44,7 @@ sub = {
   lon = -70.67, -- longitude in decimal degrees (-180 to +180)
   lat = 41.52, -- latitude in decimal degrees (-90 to +90)
   heading = 200, -- degrees 1-360 degrees True North
+  desired_heading = 200, -- target heading for manual helm control
   speed = 0, -- knots 0-160
   acc = 5,
   max_speed = 160,
@@ -165,6 +166,7 @@ collection_range = 5  -- units within which to collect
 waypoints = {}
 active_waypoint_index = 0  -- 0 = no active route, 1+ = navigating to waypoint N
 waypoint_display_info = {}  -- pre-calculated bearing/distance for display
+autopilot = false  -- autopilot heading control (can be toggled on/off)
 
 -- cursor for bridge map (screen coordinates)
 cursor = {
@@ -384,6 +386,7 @@ function setup_bridge_buttons()
       -- activate navigation if this is first waypoint
       if active_waypoint_index == 0 then
         active_waypoint_index = 1
+        autopilot = true
       end
     end
   })
@@ -420,41 +423,51 @@ function setup_helm_buttons()
   button("left_big", 102, 12, cycle_station_backward, "BR")
   button("right_big", 102, 21, cycle_station_forward, "EN")
 
-  dpad(18, 60, {
+  -- autopilot toggle button (aligned with autopilot label)
+  button("action", 10, 38, function()
+    -- toggle autopilot on/off
+    autopilot = not autopilot
+    -- if enabling autopilot, check if valid waypoint exists
+    if autopilot then
+      if #waypoints == 0 or active_waypoint_index == 0 then
+        -- no waypoints or route completed, can't enable autopilot
+        autopilot = false
+      end
+    end
+  end)
+
+  -- heading/depth dpad (left/right to adjust heading, up/down adjust depth)
+  dpad(23, 67, {
     label = "heading",
     left = function()
-      sub.heading -= 15
-      if sub.heading < 0 then sub.heading += 360 end
+      sub.desired_heading -= 15
+      if sub.desired_heading < 0 then sub.desired_heading += 360 end
+      autopilot = false  -- manual heading change disables autopilot
     end,
     right = function()
-      sub.heading += 15
-      if sub.heading >= 360 then sub.heading -= 360 end
-    end
-  })
-
-  dpad(56, 60, {
-    label = "speed",
-    up = function()
-      sub.speed += 10
-      if sub.speed > 160 then sub.speed = 160 end
+      sub.desired_heading += 15
+      if sub.desired_heading >= 360 then sub.desired_heading -= 360 end
+      autopilot = false  -- manual heading change disables autopilot
     end,
-    down = function()
-      sub.speed -= 10
-      if sub.speed < 0 then sub.speed = 0 end
-    end
-  })
-
-  dpad(94, 60, {
-    label = "depth",
     up = function()
       sub.depth -= 50
       if sub.depth < 0 then sub.depth = 0 end
     end,
     down = function()
       sub.depth += 50
-      if sub.depth > 1200 then sub.depth = 1200 end
+      if sub.depth > 12000 then sub.depth = 12000 end
     end
   })
+
+  -- speed up/down buttons (aligned with speed label)
+  button("up", 96, 58, function()
+    sub.speed += 10
+    if sub.speed > 160 then sub.speed = 160 end
+  end)
+  button("down", 96, 68, function()
+    sub.speed -= 10
+    if sub.speed < 0 then sub.speed = 0 end
+  end)
 end
 
 function setup_engineering_buttons()
@@ -556,8 +569,11 @@ function update_time()
 end
 
 function update_movement()
-  -- auto-navigate to waypoint if active
-  if active_waypoint_index > 0 and active_waypoint_index <= #waypoints then
+  -- determine target heading based on autopilot or manual control
+  local target_heading = sub.desired_heading  -- default to manual helm heading
+
+  -- auto-navigate to waypoint if active and autopilot enabled
+  if active_waypoint_index > 0 and active_waypoint_index <= #waypoints and autopilot then
     local target_wpt = waypoints[active_waypoint_index]
     local dist = calculate_distance(sub.lon, sub.lat, target_wpt.lon, target_wpt.lat)
 
@@ -568,38 +584,38 @@ function update_movement()
       if active_waypoint_index > #waypoints then
         -- reached final waypoint, stop
         active_waypoint_index = 0
+        autopilot = false
         sub.speed = 0
       end
     else
       -- calculate desired heading to waypoint
-      -- use same bearing calculation as display
-      -- negate dy because world Y+ = south, add 180 to correct offset
-      local desired_heading = calculate_bearing(sub.lon, sub.lat, target_wpt.lon, target_wpt.lat)
-
-      -- gradually adjust heading toward waypoint
-      local heading_diff = desired_heading - sub.heading
-      -- normalize to -180 to 180
-      if heading_diff > 180 then heading_diff -= 360 end
-      if heading_diff < -180 then heading_diff += 360 end
-
-      -- adjust heading (5 degrees per second max turn rate)
-      -- at 30fps: 5/30 = 0.167 degrees per frame
-      local turn_rate = 5 / 30
-      if abs(heading_diff) > turn_rate then
-        if heading_diff > 0 then
-          sub.heading += turn_rate
-        else
-          sub.heading -= turn_rate
-        end
-      else
-        sub.heading = desired_heading
-      end
-
-      -- wrap heading
-      if sub.heading >= 360 then sub.heading -= 360 end
-      if sub.heading < 0 then sub.heading += 360 end
+      target_heading = calculate_bearing(sub.lon, sub.lat, target_wpt.lon, target_wpt.lat)
     end
   end
+
+  -- gradually adjust heading toward target (autopilot or manual)
+  -- apply turn rate limiting (5 degrees per second max)
+  local heading_diff = target_heading - sub.heading
+  -- normalize to -180 to 180
+  if heading_diff > 180 then heading_diff -= 360 end
+  if heading_diff < -180 then heading_diff += 360 end
+
+  -- adjust heading (5 degrees per second max turn rate)
+  -- at 30fps: 5/30 = 0.167 degrees per frame
+  local turn_rate = 5 / 30
+  if abs(heading_diff) > turn_rate then
+    if heading_diff > 0 then
+      sub.heading += turn_rate
+    else
+      sub.heading -= turn_rate
+    end
+  else
+    sub.heading = target_heading
+  end
+
+  -- wrap heading
+  if sub.heading >= 360 then sub.heading -= 360 end
+  if sub.heading < 0 then sub.heading += 360 end
 
   -- convert heading (0-360 degrees) to pico-8 angle (0.0-1.0)
   -- heading: 0=north, 90=east, 180=south, 270=west
@@ -699,8 +715,8 @@ function draw_button_sprite(x, y, type, state, label)
     left = {normal=8, selected=3, active=13},
     right = {normal=9, selected=4, active=14},
     action = {normal=10, selected=5, active=15},
-    left_big = {normal=21, selected=21, active=17},
-    right_big = {normal=23, selected=23, active=19}
+    left_big = {normal=21, selected=17, active=17},
+    right_big = {normal=23, selected=19, active=19}
   }
 
   -- get sprite number from map
@@ -1202,22 +1218,32 @@ function draw_helm()
   -- display position
   print("position", 10, y, 6)
   print(format_position(sub.lon, sub.lat), 10, y+6, 7)
-  y += 20
+  y += 14
 
-  -- display current values above dpads
+  -- autopilot status indicator (button at y=38)
+  local ap_status = autopilot and "on" or "off"
+  local ap_color = autopilot and 11 or 6
+  print("autopilot", 10, y, 6)
+  print(ap_status, 24, y+6, ap_color)
+  y += 15
+
+  -- display current values above controls
   local compass = {"n", "ne", "e", "se", "s", "sw", "w", "nw"}
   local dir_idx = flr((sub.heading + 22.5) / 45) % 8 + 1
 
-  print("heading", 10, y, 6)
-  print(flr(sub.heading) .. " " .. compass[dir_idx], 10, y+6, 7)
+  -- heading label (dpad center at x=23, y=67)
+  print("heading", 5, y, 6)
+  print(flr(sub.heading) .. " " .. compass[dir_idx], 5, y+6, 7)
 
-  print("speed", 60, y, 6)
-  print(flr(sub.speed) .. " kts", 60, y+6, 7)
+  -- depth label (dpad center at x=23, y=67, up/down controls depth)
+  print("depth", 43, y, 6)
+  print(flr(sub.depth) .. " m", 43, y+6, 7)
 
-  print("depth", 95, y, 6)
-  print(flr(sub.depth) .. " m", 95, y+6, 7)
+  -- speed label (buttons at x=96, y=58/68)
+  print("speed", 90, y, 6)
+  print(flr(sub.speed) .. " kts", 87, y+6, 7)
 
-  -- draw buttons (dpads will be drawn below labels)
+  -- draw buttons
   draw_ui_buttons()
 end
 
