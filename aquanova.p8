@@ -151,14 +151,24 @@ missions ={
 
 -- sample sites (decimal degrees)
 sample_sites = {
-  {lon=-69.9, lat=40.7, collected=false},     -- ~8°20'E, 5°N
-  {lon=-6.67, lat=3.33, collected=false},   -- ~6°40'W, 3°20'N
-  {lon=5.0, lat=-8.33, collected=false}     -- 5°E, ~8°20'S
+  {name="???",
+    type="???", -- Biological/Mineral/Energy/Artifact
+    properties = {},  -- Thermal/Chemical/Radiation/Magnetic (revealed by analysis)
+    lon=-69.9, 
+    lat=40.7, 
+    rarity = 2,  -- 1-4 (affects research value)
+    collected=false,
+    anyalysed=false
+  },
+  {lon=-6.67, lat=3.33, collected=false},  
+  {lon=5.0, lat=-8.33, collected=false}
 }
 
 -- sample collection
 samples_collected = 0
 collection_range = 5  -- units within which to collect
+sel_smp=0 col_smp={} -- selected sample, collected samples list
+ana_st="idle" ana_md="manual" tune=50 apr=0 atm=0 -- analysis state/mode, tuning, progress, timer
 
 -- waypoint system
 -- waypoint 0 = ownship present position (implicit)
@@ -167,6 +177,10 @@ waypoints = {}
 active_waypoint_index = 0  -- 0 = no active route, 1+ = navigating to waypoint N
 waypoint_display_info = {}  -- pre-calculated bearing/distance for display
 autopilot = false  -- autopilot heading control (can be toggled on/off)
+
+-- notification system
+notification_msg = ""
+notification_timer = 0
 
 -- cursor for bridge map (screen coordinates)
 cursor = {
@@ -224,6 +238,20 @@ function _update()
   update_docking()
   update_sample_collection()
   update_waypoint_info()
+  update_notifications()
+  if station=="science" and ana_st=="auto" then atm+=1 if atm>=150 then fin_ana() else apr=(atm/150)*100 end end
+end
+
+function update_notifications()
+  -- decrease notification timer
+  if notification_timer > 0 then
+    notification_timer -= 1
+  end
+end
+
+function show_notification(msg)
+  notification_msg = msg
+  notification_timer = 90  -- show for 3 seconds (90 frames at 30fps)
 end
 
 function handle_input()
@@ -387,6 +415,8 @@ function setup_bridge_buttons()
       if active_waypoint_index == 0 then
         active_waypoint_index = 1
         autopilot = true
+        -- sync desired_heading with waypoint bearing to prevent jump when autopilot disables
+        sub.desired_heading = calculate_bearing(sub.lon, sub.lat, world_lon, world_lat)
       end
     end
   })
@@ -432,7 +462,15 @@ function setup_helm_buttons()
       if #waypoints == 0 or active_waypoint_index == 0 then
         -- no waypoints or route completed, can't enable autopilot
         autopilot = false
+      else
+        -- sync desired_heading with current waypoint bearing
+        local target_wpt = waypoints[active_waypoint_index]
+        sub.desired_heading = calculate_bearing(sub.lon, sub.lat, target_wpt.lon, target_wpt.lat)
       end
+    else
+      -- sync desired_heading to current heading when disabling autopilot
+      -- this prevents sudden turns when switching to manual control
+      sub.desired_heading = sub.heading
     end
   end)
 
@@ -460,13 +498,16 @@ function setup_helm_buttons()
   })
 
   -- speed up/down buttons (aligned with speed label)
+  -- NOTE: Speed changes should NOT disable autopilot
   button("up", 96, 58, function()
     sub.speed += 10
     if sub.speed > 160 then sub.speed = 160 end
+    -- autopilot remains active when changing speed
   end)
   button("down", 96, 68, function()
     sub.speed -= 10
     if sub.speed < 0 then sub.speed = 0 end
+    -- autopilot remains active when changing speed
   end)
 end
 
@@ -478,6 +519,11 @@ end
 function setup_science_buttons()
   button("left_big", 102, 12, cycle_station_backward, "EN")
   button("right_big", 102, 21, cycle_station_forward, "QT")
+  button("action", 2, 75, do_col)
+  button("up", 2, 88, do_prv)
+  button("down", 12, 88, do_nxt)
+  button("action", 2, 102, do_tog)
+  dpad(68, 85, {label="tune",left=function() do_tun(-2) end,right=function() do_tun(2) end,up=function() do_tun(10) end,down=function() do_tun(-10) end,action=do_ana})
 end
 
 function setup_quarters_buttons()
@@ -582,10 +628,16 @@ function update_movement()
       -- advance to next waypoint
       active_waypoint_index += 1
       if active_waypoint_index > #waypoints then
-        -- reached final waypoint, stop
+        -- reached final waypoint, stop and clear waypoints
+        show_notification("destination reached")
         active_waypoint_index = 0
         autopilot = false
         sub.speed = 0
+        waypoints = {}  -- clear waypoint list
+        waypoint_display_info = {}  -- clear display info
+      else
+        -- reached intermediate waypoint
+        show_notification("waypoint " .. (active_waypoint_index - 1) .. " reached")
       end
     else
       -- calculate desired heading to waypoint
@@ -676,18 +728,7 @@ end
 
 
 function update_sample_collection()
-  -- check if near any uncollected sample sites
-  for site in all(sample_sites) do
-    if not site.collected then
-      local dist = calculate_distance(sub.lon, sub.lat, site.lon, site.lat)
-
-      if dist < collection_range then
-        site.collected = true
-        samples_collected += 1
-        resources.money += 100  -- reward for sample
-      end
-    end
-  end
+  -- manual collection only, no auto-collect
 end
 
 function update_waypoint_info()
@@ -912,6 +953,17 @@ function calculate_bearing(lon1, lat1, lon2, lat2)
 
   return bearing
 end
+
+-- science functions
+function gen_spec(s) s.sp={} s.tf=20+rnd(60) for i=1,40 do s.sp[i]=20+rnd(20)+(i==flr(s.tf/2.5)+1 and 60 or 0) end end
+function do_col() for i,s in pairs(sample_sites) do if not s.collected and calculate_distance(sub.lon,sub.lat,s.lon,s.lat)<collection_range then s.collected=true samples_collected+=1 add(col_smp,i) gen_spec(s) sel_smp=i resources.money+=50 return end end end
+function do_prv() if #col_smp==0 then return end for i,v in pairs(col_smp) do if v==sel_smp then sel_smp=col_smp[i==1 and #col_smp or i-1] ana_st="idle" atm=0 apr=0 tune=50 return end end end
+function do_nxt() if #col_smp==0 then return end for i,v in pairs(col_smp) do if v==sel_smp then sel_smp=col_smp[i==#col_smp and 1 or i+1] ana_st="idle" atm=0 apr=0 tune=50 return end end end
+function do_tog() if ana_md=="manual" then ana_md="auto" ana_st="auto" atm=0 else ana_md="manual" ana_st="idle" atm=0 apr=0 end end
+function do_tun(d) if ana_st=="auto" then return end tune=mid(0,tune+d,100) if ana_st=="idle" then ana_st="tune" end end
+function do_ana() if sel_smp==0 or ana_st=="auto" then return end local s=sample_sites[sel_smp] if s.anyalysed then return end if abs(tune-s.tf)<=5 then fin_ana() end end
+function fin_ana() if sel_smp==0 then return end local s=sample_sites[sel_smp] s.anyalysed=true ana_st="done" s.type=({"bio","min","nrg","art"})[flr(rnd(4))+1] s.name=s.type.." #"..sel_smp resources.money+=200 resources.reputation+=1 end
+function chk_col() for i,s in pairs(sample_sites) do if not s.collected and calculate_distance(sub.lon,sub.lat,s.lon,s.lat)<collection_range then return true end end return false end
 
 function draw_waypoint_info()
   -- display first 3 waypoints with bearing and distance on right side
@@ -1208,6 +1260,15 @@ function draw_bridge()
 
   -- draw d-pad control on right side (outside map)
   draw_ui_buttons()
+
+  -- draw notification if active
+  if notification_timer > 0 then
+    local msg_width = #notification_msg * 4
+    local msg_x = 48 - msg_width / 2
+    rectfill(msg_x - 2, 62, msg_x + msg_width + 2, 70, 1)
+    rect(msg_x - 2, 62, msg_x + msg_width + 2, 70, 11)
+    print(notification_msg, msg_x, 64, 10)
+  end
 end
 
 function draw_helm()
@@ -1245,6 +1306,11 @@ function draw_helm()
 
   -- draw buttons
   draw_ui_buttons()
+
+  -- draw notification if active
+  if notification_timer > 0 then
+    print(notification_msg, 2, 120, 10)
+  end
 end
 
 function draw_ui_buttons()
@@ -1256,27 +1322,16 @@ function draw_ui_buttons()
 end
 
 function draw_science()
-  print("science", 42, 12, 7)
-
-  local y = 30
-  print("samples collected", 18, y, 7)
-  y += 8
-  print(samples_collected .. " / " .. #sample_sites, 40, y, 11)
-  y += 15
-
-  -- list sample sites
-  for i, site in pairs(sample_sites) do
-    local status = "uncollected"
-    local col = 8
-    if site.collected then
-      status = "collected"
-      col = 11
-    end
-    print("site " .. i .. ": " .. status, 10, y, col)
-    y += 8
-  end
-
-  -- draw buttons
+  print("science",101,2,7)
+  print("material analysis",2,2,7)
+  local y,s,sp=14,sel_smp>0 and sample_sites[sel_smp] or nil,nil
+  if s then sp=s.sp print("smpld #"..sel_smp,50,2,11) print("mode:"..ana_md,2,8,6) if s.anyalysed then print("type:"..s.type,50,8,10) end end
+  y=16 rect(2,y,62,y+54,7)
+  if sp then for i=1,#sp do local h=sp[i]/2 rectfill(3+i*1.5,y+54-h,4+i*1.5,y+54,11) end local tx=3+tune*0.6 line(tx,y+1,tx,y+53,10) if s.anyalysed or ana_st=="auto" then local tf=3+s.tf*0.6 line(tf,y+1,tf,y+53,8) end end
+  y=18 if s then print("sample "..#col_smp,66,y,6) y+=8 if s.anyalysed then print("analyzed",66,y,10) else print("ready",66,y,7) end end
+  y+=8 print(chk_col() and "in range" or "out range",66,y,chk_col() and 11 or 8)
+  if ana_st=="auto" then print("auto:"..flr(apr).."%",66,y+8,11) end
+  print("collect",10,76,6) print("select",10,89,6) print("mode",10,103,6) print("tune",68,76,6) print("freq:"..flr(tune),68,113,7)
   draw_ui_buttons()
 end
 
