@@ -49,8 +49,11 @@ sub = {
   acc = 5,
   max_speed = 160,
   depth = 0, -- meters 0-12000
+  prev_depth = 0,
   dive_acc = 100, -- m/s
   max_depth = 12000,
+  pitch = 0,
+  roll = 0,
   docked = {
     status = true, -- docked at port or not
     name = "woods hole", -- name of current port
@@ -454,7 +457,7 @@ function setup_helm_buttons()
   button("right_big", 102, 21, cycle_station_forward, "EN")
 
   -- autopilot toggle button (aligned with autopilot label)
-  button("action", 10, 38, function()
+  button("action", 86, 43, function()
     -- toggle autopilot on/off
     autopilot = not autopilot
     -- if enabling autopilot, check if valid waypoint exists
@@ -475,7 +478,7 @@ function setup_helm_buttons()
   end)
 
   -- heading/depth dpad (left/right to adjust heading, up/down adjust depth)
-  dpad(23, 67, {
+  dpad(12, 43, {
     label = "heading",
     left = function()
       sub.desired_heading -= 15
@@ -499,13 +502,13 @@ function setup_helm_buttons()
 
   -- speed up/down buttons (aligned with speed label)
   -- NOTE: Speed changes should NOT disable autopilot
-  button("up", 96, 58, function()
-    sub.speed += 10
+  button("up", 34, 34, function()
+    sub.speed += 5
     if sub.speed > 160 then sub.speed = 160 end
     -- autopilot remains active when changing speed
   end)
-  button("down", 96, 68, function()
-    sub.speed -= 10
+  button("down", 34, 43, function()
+    sub.speed -= 5
     if sub.speed < 0 then sub.speed = 0 end
     -- autopilot remains active when changing speed
   end)
@@ -614,6 +617,74 @@ function update_time()
   end
 end
 
+function update_ah() -- dynamic artaficial horizon
+  local cx, cy = 64, 64
+  local r = 20
+  local roll = sub.roll / 360
+  local pitch_y = sub.pitch
+
+  -- draw sky background
+  circfill(cx, cy, r, 12)
+
+  -- draw ground (pixel by pixel)
+  for dy=-r,r do
+    for dx=-r,r do
+      if dx*dx+dy*dy<=r*r then
+        -- rotate and offset this pixel
+        local ry = dx*sin(roll) - dy*cos(roll) - pitch_y
+        if ry < 0 then pset(cx+dx, cy+dy, 3) end
+      end
+    end
+  end
+
+  -- draw horizon line
+  for dx = -r, r do
+    local rx = dx * cos(roll) + pitch_y * sin(roll)
+    local ry = dx * sin(roll) - pitch_y * cos(roll)
+    if rx*rx + ry*ry <= r*r then pset(cx + rx, cy + ry, 7) end
+  end
+
+  -- draw pitch ladder (5deg minor, 10deg major)
+  for p = -20, 20, 5 do
+    if p != 0 then
+      local len = p % 10 == 0 and 6 or 3
+      local y = p - pitch_y
+      for dx = -len, len do
+        local rx = dx * cos(roll) + y * sin(roll)
+        local ry = dx * sin(roll) - y * cos(roll)
+        if rx*rx + ry*ry <= r*r then pset(cx + rx, cy + ry, 6) end
+      end
+    end
+  end
+
+  -- draw ship triangle (your reference)
+  line(cx, cy, cx + 14, cy + 14, 10)
+  line(cx, cy, cx - 14, cy + 14, 10)
+  line(cx - 14, cy + 14, cx + 14, cy + 14, 10)
+end
+
+function draw_scale(x,y,h,v,lbl)
+ local hy=y+h/2
+ v=mid(-1,v,1)
+ -- hat at top
+ line(x,y,x+12,y,5)
+ line(x,y,x,y+2,5)
+ line(x,y+hy,x+12,y+hy,5)
+ -- vertical line on right
+ line(x+12,y,x+12,y+h,5)
+ -- tick marks extending left
+ for i=-1,1,0.25 do
+  local ty=hy+i*h/2
+  line(x+10,ty,x+12,ty,5)
+ end
+ -- indicator: circle with line
+ local iy=hy+v*h/2
+ circ(x+6,iy,2,8)
+ line(x+2,iy,x+12,iy,8)
+ -- label at top
+ print(lbl,x+2,y+2,12)
+end
+
 function update_movement()
   -- determine target heading based on autopilot or manual control
   local target_heading = sub.desired_heading  -- default to manual helm heading
@@ -668,6 +739,13 @@ function update_movement()
   -- wrap heading
   if sub.heading >= 360 then sub.heading -= 360 end
   if sub.heading < 0 then sub.heading += 360 end
+
+  -- update pitch based on depth change
+  sub.pitch = (sub.depth - sub.prev_depth) * 0.3
+  sub.prev_depth = sub.depth
+
+  -- update roll based on turn rate
+  sub.roll = mid(-30, heading_diff * 100, 30)
 
   -- convert heading (0-360 degrees) to pico-8 angle (0.0-1.0)
   -- heading: 0=north, 90=east, 180=south, 270=west
@@ -978,11 +1056,18 @@ function draw_waypoint_info()
   end
 end
 
-function draw_corner_mask()
-  -- fill triangular corner mask
-  -- covers area above diagonal from (0,32) to (32,0)
-  for y=0,31 do
-    line(0, y, 32-y, y, 1)
+function draw_corner_mask(x,y,w,h,col,flip) -- draw a fill triangle start point, width, height, color and flipped
+  local col = col or 1
+  local flip = flip or false
+  -- fill triangle
+  for dy=0,h do
+    if flip then
+      local len=w*(1-dy/h)
+      line(x, y+dy, x+len, y+dy, col)
+    else
+      local len=w*(dy/h)
+      line(x+len,y+dy, x+w, y+dy, col)
+    end
   end
 end
 
@@ -1217,7 +1302,7 @@ function draw_bridge()
   draw_rotated_sub(47, 64, sub.heading)
 
   -- draw corner mask
-  draw_corner_mask()
+  draw_corner_mask(0,0, 32, 32, 1, true)
 
   -- draw border mask rectangles to hide overflow
   draw_border_mask()
@@ -1272,37 +1357,51 @@ function draw_bridge()
 end
 
 function draw_helm()
-  print("helm controls", 32, 12, 7)
+  cls()
+  rectfill(0,0, 127,32, 1)
+  rectfill(0,96, 127,127, 1)
+  draw_corner_mask(0,32, 64,64, 1, true)
+  draw_corner_mask(64,32,64,64, 1)
 
-  local y = 20
+  draw_dev_grid()
+
+  print("helm controls", 32, 1, 7)
+
+  -- basic info block
+  print("depth", 10, 8, 12)
+  print(pad_zeros(flr(sub.depth), 5) .. " m", 32, 8, 10)
+  print("hdg", 10, 14, 12)
+  print(pad_zeros(flr(sub.heading), 3) .. "t", 32, 14, 10)
+  print("speed", 10, 21, 12)
+  print(pad_zeros(flr(sub.speed), 3) .. " kts", 32, 21, 10)
+
+  -- draw AH border triangle
+  line(64,32, 127,96, 12)
+  line(0,96, 96,96, 12)
+  line(0,96, 64,32, 12)
+
+  -- draw artificial horizon
+  update_ah()
 
   -- display position
-  print("position", 10, y, 6)
-  print(format_position(sub.lon, sub.lat), 10, y+6, 7)
-  y += 14
+  print(format_position(sub.lon, sub.lat), 10, 89, 7)
 
-  -- autopilot status indicator (button at y=38)
+  -- dive planes (reuse sub.pitch/roll from AH)
+  local p,r=sub.pitch/30,sub.roll/30
+  print("lefx planes",2,98,12)
+  draw_scale(2,104,20,mid(-1,p-r*0.3,1),"pt")
+  draw_scale(26,104,20,mid(-1,p+r*0.3,1),"sd")
+  print("aft steering",65,98,12)
+  draw_scale(38,104,20,mid(-1,p+r*0.2,1),"1")
+  draw_scale(64,104,20,mid(-1,p-r*0.2,1),"2")
+  draw_scale(90,104,20,mid(-1,p+r*0.2,1),"3")
+  draw_scale(116,104,20,mid(-1,p-r*0.2,1),"4")
+
+  -- autopilot status indicator 
   local ap_status = autopilot and "on" or "off"
   local ap_color = autopilot and 11 or 6
-  print("autopilot", 10, y, 6)
-  print(ap_status, 24, y+6, ap_color)
-  y += 15
-
-  -- display current values above controls
-  local compass = {"n", "ne", "e", "se", "s", "sw", "w", "nw"}
-  local dir_idx = flr((sub.heading + 22.5) / 45) % 8 + 1
-
-  -- heading label (dpad center at x=23, y=67)
-  print("heading", 5, y, 6)
-  print(flr(sub.heading) .. " " .. compass[dir_idx], 5, y+6, 7)
-
-  -- depth label (dpad center at x=23, y=67, up/down controls depth)
-  print("depth", 43, y, 6)
-  print(flr(sub.depth) .. " m", 43, y+6, 7)
-
-  -- speed label (buttons at x=96, y=58/68)
-  print("speed", 90, y, 6)
-  print(flr(sub.speed) .. " kts", 87, y+6, 7)
+  print("autopilot", 86, 37, 6)
+  print(ap_status, 100, 43, ap_color)
 
   -- draw buttons
   draw_ui_buttons()
