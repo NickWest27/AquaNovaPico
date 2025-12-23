@@ -95,7 +95,7 @@ button_types = {
 -- === map and locations ===
 -- scale: 1 world unit = 1 decimal degree
 world_size = 360.0 -- world is full globe: 360 decimal degrees
-map_size = 96 -- map display is 96れ❎96 pixels
+map_size = 96 -- map display is 96×96 pixels
 
 -- zoom system: zoom_level index selects from zoom_levels table
 -- pixels per degree: higher zoom = closer view
@@ -106,7 +106,7 @@ zoom = zoom_levels[zoom_level] -- actual zoom multiplier
 -- world coordinates (full globe):
 -- lon: longitude -180.0 to +180.0 (wraps at boundaries)
 -- lat: latitude -90.0 to +90.0 (clamps at poles)
--- zoom effects: level 1 (0.25x) shows 384るぬ, level 7 (16.0x) shows 6るぬ, level 9 (64.0x) shows 1.5るぬ
+-- zoom effects: level 1 (0.25x) shows 384°, level 7 (16.0x) shows 6°, level 9 (64.0x) shows 1.5°
 
 -- port locations (decimal degrees)
 ports = {
@@ -1041,15 +1041,15 @@ end
 
 function degrees_to_minutes(degrees)
   -- convert decimal degrees to whole degrees + minutes
-  -- example: 45.5るぬ = 45るぬ 30'
+  -- example: 45.5° = 45° 30'
   local deg = flr(abs(degrees))
   local min = flr((abs(degrees) - deg) * 60)
   return deg, min
 end
 
 function format_position(world_lon, world_lat)
-  -- format position as "DDDるぬMM'W DDるぬMM'N" format
-  -- returns string like "045るぬ30e 23るぬ15n"
+  -- format position as "DDD°MM'W DD°MM'N" format
+  -- returns string like "045°30e 23°15n"
   -- coordinates are already in decimal degrees
 
   -- convert decimal degrees to degrees + minutes
@@ -1059,7 +1059,7 @@ function format_position(world_lon, world_lat)
   local lat_deg, lat_min = degrees_to_minutes(world_lat)
   local lat_dir = world_lat >= 0 and "n" or "s"
 
-  -- format: "045るぬ30e 23るぬ15n"
+  -- format: "045°30e 23°15n"
   return pad_zeros(lon_deg, 3) .. "\31" .. pad_zeros(lon_min, 2) .. lon_dir .. " " ..
          pad_zeros(lat_deg, 2) .. "\31" .. pad_zeros(lat_min, 2) .. lat_dir
 end
