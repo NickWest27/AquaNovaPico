@@ -146,46 +146,34 @@ locations = {
   -- if "then" the tasks are sequential, if "and" they can be done in any order, etc.
   -- change lon/lat from readable format to decimal degrees for calculations.
 missions ={
-  {id=1,msg="collect 3 bio samples in ao",sample_type="bio",reward=500,objs={},completed=false,transmitted=false},
-  {id=2,msg="analyze mineral deposits",sample_type="min",reward=600,objs={},completed=false,transmitted=false}
+  {msg="proceed to the "..locations[1].name.." at "..locations[1].lon ..", "..locations[1].lat,
+    tasks = {{}},
+    completed = false,
+    transmitted = false
+  }
 }
 
 
 -- sample sites (decimal degrees)
--- unified objectives (samples, waypoints, etc)
-objs = {}
-inv={} -- sample inventory
-so=0 amd=0 tune=0 gain=0 atm=0
-
--- sample wave templates
-sample_defs = {
-  bio={waves={{offset=12,amp=3,tt=45,tg=3},{offset=67,amp=2,tt=45,tg=4},{offset=89,amp=4,tt=48,tg=3}},origin="volcanic",tags={"thermal","chemosyn"},rarity=1},
-  min={waves={{offset=23,amp=2,tt=60,tg=2},{offset=45,amp=3,tt=58,tg=3}},origin="sediment",rarity=2},
-  nrg={waves={{offset=5,amp=5,tt=30,tg=5},{offset=78,amp=3,tt=33,tg=4}},origin="geothermal",rarity=2},
-  art={waves={{offset=90,amp=1,tt=80,tg=2}},origin="unknown",rarity=4}
+sample_sites = {
+  {name="???",
+    type="???", -- Biological/Mineral/Energy/Artifact
+    properties = {},  -- Thermal/Chemical/Radiation/Magnetic (revealed by analysis)
+    lon=-69.9, 
+    lat=40.7, 
+    rarity = 2,  -- 1-4 (affects research value)
+    collected=false,
+    anyalysed=false
+  },
+  {lon=-6.67, lat=3.33, collected=false},  
+  {lon=5.0, lat=-8.33, collected=false}
 }
 
-function spawn_mission(m)
-  local stype=m.sample_type or "bio"
-  local def=sample_defs[stype]
-  for i=1,3 do
-    local o={typ=2,lon=-70+rnd(2),lat=40+rnd(2),rng=5,st=0,mid=m.id,stype=stype,waves=def.waves,name=stype.." sample #"..i,origin=def.origin,tags=def.tags,rarity=def.rarity}
-    add(objs,o)
-    add(m.objs,#objs)
-  end
-end
-
-function update_missions()
-  for m in all(missions) do
-    if not m.completed then
-      local cnt=0
-      for s in all(inv) do
-        if s.mid==m.id and s.st==2 then cnt+=1 end
-      end
-      if cnt>=3 then m.completed=true resources.money+=m.reward end
-    end
-  end
-end
+-- sample collection
+samples_collected = 0
+collection_range = 5  -- units within which to collect
+sel_smp=0 col_smp={} -- selected sample, collected samples list
+ana_st="idle" ana_md="manual" tune=50 apr=0 atm=0 -- analysis state/mode, tuning, progress, timer
 
 -- waypoint system
 -- waypoint 0 = ownship present position (implicit)
@@ -212,7 +200,6 @@ function _init()
   -- start at port (sub always starts docked at woods hole)
   setup_port_buttons()
   -- reset game state after game over (keep mission progression, reset everything else)
-  spawn_mission(missions[1])
 end
 
 function setup_station_buttons()
@@ -254,10 +241,10 @@ function _update()
   update_time()
   update_movement()
   update_docking()
+  update_sample_collection()
   update_waypoint_info()
   update_notifications()
-  update_missions()
-  if station=="science" and so>0 and so<=#inv and inv[so].st==1 and atm>0 then atm-=1 if atm==0 then local o=inv[so] if amd==1 or chk_lock(o) then o.st=2 resources.reputation+=o.rarity else o.st=3 resources.reputation-=o.rarity end amd=0 end end
+  if station=="science" and ana_st=="auto" then atm+=1 if atm>=150 then fin_ana() else apr=(atm/150)*100 end end
 end
 
 function update_notifications()
@@ -535,15 +522,13 @@ function setup_engineering_buttons()
 end
 
 function setup_science_buttons()
-  button("left_big",102,12,cycle_station_backward,"EN")
-  button("right_big",102,21,cycle_station_forward,"QT")
-  button("action",2,65,do_col)
-  button("action",2,75,do_dis)
-  button("up",2,85,do_prv)
-  button("down",12,85,do_nxt)
-  button("action",2,94,do_auto)
-  dpad(72,74,{label="tune",left=function()do_tun(-2)end,right=function()do_tun(2)end,up=function()do_tun(10)end,down=function()do_tun(-10)end,action=do_ana})
-  dpad(102,74,{label="gain",left=function()do_gain(-0.5)end,right=function()do_gain(0.5)end,up=function()do_gain(1)end,down=function()do_gain(-1)end,action=do_ana})
+  button("left_big", 102, 12, cycle_station_backward, "EN")
+  button("right_big", 102, 21, cycle_station_forward, "QT")
+  button("action", 2, 75, do_col)
+  button("up", 2, 88, do_prv)
+  button("down", 12, 88, do_nxt)
+  button("action", 2, 102, do_tog)
+  dpad(68, 85, {label="tune",left=function() do_tun(-2) end,right=function() do_tun(2) end,up=function() do_tun(10) end,down=function() do_tun(-10) end,action=do_ana})
 end
 
 function setup_quarters_buttons()
@@ -869,6 +854,9 @@ function update_docking()
 end
 
 
+function update_sample_collection()
+  -- manual collection only, no auto-collect
+end
 
 function update_waypoint_info()
   -- pre-calculate waypoint display info (bearing/distance)
@@ -1094,16 +1082,15 @@ function calculate_bearing(lon1, lat1, lon2, lat2)
 end
 
 -- science functions
-function rst() atm=0 tune=0 gain=0 end
-function do_col() for i,o in pairs(objs) do if o.typ==2 and o.st==0 and calculate_distance(sub.lon,sub.lat,o.lon,o.lat)<o.rng then del(objs,o) add(inv,o) so=#inv rst() return end end end
-function do_prv() if #inv==0 or so<=1 then return end so-=1 rst() end
-function do_nxt() if #inv==0 or so>=#inv then return end so+=1 rst() end
-function do_tun(d) if amd==0 then tune=mid(0,tune+d,100) end end
-function do_gain(d) if amd==0 then gain=mid(1,gain+d,10) end end
-function do_dis() if so>0 and so<=#inv then del(inv,inv[so]) if so>#inv then so=#inv end rst() end end
-function do_ana() if so>0 and so<=#inv and inv[so].st==0 and resources.supplies>=1 then resources.supplies-=1 inv[so].st=1 inv[so].lt=tune inv[so].lg=gain atm=300 end end
-function do_auto() if so>0 and so<=#inv and inv[so].st==0 and resources.supplies>=2 then resources.supplies-=2 inv[so].st=1 atm=inv[so].rarity*1800 amd=1 end end
-function chk_lock(o) for w in all(o.waves) do if abs(o.lt-w.tt)>5 or abs(o.lg-w.tg)>1 then return false end end return true end
+function gen_spec(s) s.sp={} s.tf=20+rnd(60) for i=1,40 do s.sp[i]=20+rnd(20)+(i==flr(s.tf/2.5)+1 and 60 or 0) end end
+function do_col() for i,s in pairs(sample_sites) do if not s.collected and calculate_distance(sub.lon,sub.lat,s.lon,s.lat)<collection_range then s.collected=true samples_collected+=1 add(col_smp,i) gen_spec(s) sel_smp=i resources.money+=50 return end end end
+function do_prv() if #col_smp==0 then return end for i,v in pairs(col_smp) do if v==sel_smp then sel_smp=col_smp[i==1 and #col_smp or i-1] ana_st="idle" atm=0 apr=0 tune=50 return end end end
+function do_nxt() if #col_smp==0 then return end for i,v in pairs(col_smp) do if v==sel_smp then sel_smp=col_smp[i==#col_smp and 1 or i+1] ana_st="idle" atm=0 apr=0 tune=50 return end end end
+function do_tog() if ana_md=="manual" then ana_md="auto" ana_st="auto" atm=0 else ana_md="manual" ana_st="idle" atm=0 apr=0 end end
+function do_tun(d) if ana_st=="auto" then return end tune=mid(0,tune+d,100) if ana_st=="idle" then ana_st="tune" end end
+function do_ana() if sel_smp==0 or ana_st=="auto" then return end local s=sample_sites[sel_smp] if s.anyalysed then return end if abs(tune-s.tf)<=5 then fin_ana() end end
+function fin_ana() if sel_smp==0 then return end local s=sample_sites[sel_smp] s.anyalysed=true ana_st="done" s.type=({"bio","min","nrg","art"})[flr(rnd(4))+1] s.name=s.type.." #"..sel_smp resources.money+=200 resources.reputation+=1 end
+function chk_col() for i,s in pairs(sample_sites) do if not s.collected and calculate_distance(sub.lon,sub.lat,s.lon,s.lat)<collection_range then return true end end return false end
 
 function draw_waypoint_info()
   -- display first 3 waypoints with bearing and distance on right side
@@ -1313,13 +1300,12 @@ function draw_bridge()
   spr(33, port_x-4, port_y-4) -- subtract 4 to center
 
 
-  -- draw objectives
-  for o in all(objs) do
-    local x,y=world_to_screen(o.lon,o.lat)
-    local spr_id=o.typ==1 and 34 or (o.typ==2 and 35 or 36)
-    local col=o.st==0 and 11 or (o.st==1 and 10 or 8)
-    spr(spr_id,x-4,y-4)
-    if o.st==2 then circfill(x,y,2,col) end
+  -- draw sample sites
+  for site in all(sample_sites) do
+    if not site.collected then
+      local sx, sy = world_to_screen(site.lon, site.lat)
+      spr(35, sx-4, sy-4) -- subtract 4 to center
+    end
   end
 
   -- draw waypoint route lines and markers
@@ -1494,42 +1480,14 @@ end
 function draw_science()
   print("science",101,2,7)
   print("material analysis",2,2,7)
-  local y=14
-  local o=so>0 and so<=#inv and inv[so] or nil
-  if o then
-    print("sample: "..o.name,2,8,11)
-    local st_txt=o.st==0 and "ready" or (o.st==1 and "analyzing" or (o.st==2 and "success" or (o.st==3 and "failed" or "none")))
-    local st_col=o.st==0 and 7 or (o.st==1 and 10 or (o.st==2 and 11 or 8))
-    print(st_txt,4,57,st_col)
-    rect(2,y,96,y+49,7)
-    if o.waves then
-      local wc=o.st==2 and 11 or (o.st==3 and 8 or 7)
-      for w in all(o.waves) do
-        local te=abs(tune-w.tt)/5
-        local ge=abs(gain-w.tg)/1
-        local sig=max(0,1-te)*max(0,1-ge)
-        for x=0,93 do
-          local h=sin((x+tune+w.offset)/16)*sig*8
-          pset(3+x,y+25+h,wc)
-        end
-      end
-    end
-    if o.st==1 then print("timer:"..flr(atm/30),50,57,10) end
-  end
-  local in_rng=false
-  for i,obj in pairs(objs) do
-    if obj.typ==2 and obj.st==0 and calculate_distance(sub.lon,sub.lat,obj.lon,obj.lat)<obj.rng then
-      in_rng=true break
-    end
-  end
-  print(in_rng and "in range" or "out range",66,26,in_rng and 11 or 8)
-  print("slot:"..so.."/"..#inv,66,18,7)
-  print("collect", 12,67,7)
-  print("discard", 12,77,7)
-  print("auto",12,96,7)
-  print("tune:"..flr(tune),65,91,7)
-  print("gain:"..flr(gain*10)/10,94,91,7)
-  print("supplies:"..resources.supplies,66,113,7)
+  local y,s,sp=14,sel_smp>0 and sample_sites[sel_smp] or nil,nil
+  if s then sp=s.sp print("smpld #"..sel_smp,50,2,11) print("mode:"..ana_md,2,8,6) if s.anyalysed then print("type:"..s.type,50,8,10) end end
+  y=16 rect(2,y,62,y+54,7)
+  if sp then for i=1,#sp do local h=sp[i]/2 rectfill(3+i*1.5,y+54-h,4+i*1.5,y+54,11) end local tx=3+tune*0.6 line(tx,y+1,tx,y+53,10) if s.anyalysed or ana_st=="auto" then local tf=3+s.tf*0.6 line(tf,y+1,tf,y+53,8) end end
+  y=18 if s then print("sample "..#col_smp,66,y,6) y+=8 if s.anyalysed then print("analyzed",66,y,10) else print("ready",66,y,7) end end
+  y+=8 print(chk_col() and "in range" or "out range",66,y,chk_col() and 11 or 8)
+  if ana_st=="auto" then print("auto:"..flr(apr).."%",66,y+8,11) end
+  print("collect",10,76,6) print("select",10,89,6) print("mode",10,103,6) print("tune",68,76,6) print("freq:"..flr(tune),68,113,7)
   draw_ui_buttons()
 end
 
